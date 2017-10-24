@@ -5,7 +5,7 @@ from os import environ
 
 _inis = [
     pjoin(dirname(abspath(__file__)), 'config', 'config.ini'),
-    pjoin(dirname(abspath(__file__)), 'config', environ.get('ROLE_CONFIG_FILE'))
+    pjoin(dirname(abspath(__file__)), 'config', 'agent-profile', environ.get('AGENT_PROFILE') + '.ini')
 ]
 
 _config = None

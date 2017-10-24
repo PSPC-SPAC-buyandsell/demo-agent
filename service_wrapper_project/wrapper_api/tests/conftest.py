@@ -16,6 +16,7 @@ logging.basicConfig(level=logging.DEBUG)
 @pytest.fixture(scope="session")
 def event_loop():
     loop = asyncio.get_event_loop()
+    # loop = asyncio.new_event_loop()
     yield loop
     loop.close()
 
@@ -56,14 +57,6 @@ def seed_my1():
 @pytest.fixture
 def endpoint():
     return "127.0.0.1:9700"
-
-@pytest.fixture
-def claims_endpoint():
-    return "127.0.0.1:9700"
-
-@pytest.fixture
-def service_endpoint():
-    return "127.0.0.1:9709"
 
 @pytest.fixture
 def path_temp():

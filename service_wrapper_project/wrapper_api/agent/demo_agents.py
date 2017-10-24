@@ -4,7 +4,6 @@ from requests import post
 from time import time
 from typing import Set
 
-from wrapper_api.agent.nodepool import NodePool
 from wrapper_api.agent.agents import AgentRegistrar, Origin, Verifier, Issuer, Prover
 from wrapper_api.agent.util import claim_value_pair, prune_claims_json, ppjson
 

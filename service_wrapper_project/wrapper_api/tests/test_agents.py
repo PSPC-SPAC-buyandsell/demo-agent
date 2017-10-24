@@ -1,6 +1,6 @@
 from indy import agent, anoncreds, ledger, signus, pool, wallet, IndyError
 from indy.error import ErrorCode
-from wrapper_api.agent.nodepool import NodePool
+from wrapper_api.agent.nodepool import NewPool, LivePool
 from wrapper_api.agent.demo_agents import TrustAnchorAgent, SRIAgent, OrgBookAgent, BCRegistrarAgent
 from wrapper_api.agent.util import claim_value_pair, ppjson, plain_claims_for, prune_claims_json
 
@@ -15,19 +15,20 @@ async def test_agents_direct(
         pool_genesis_txn_path,
         seed_trustee1,
         pool_genesis_txn_file,
-        claims_endpoint,
-        service_endpoint,
         path_home):
 
     # 1. Open pool
-    pool = NodePool(pool_name, pool_genesis_txn_path)
+    p = NewPool(pool_name, pool_genesis_txn_path)
 
-    await pool.open()
-    assert pool.handle is not None
+    await p.open()
+    assert p.handle
+    q = LivePool(pool_name, p.handle)
+    assert q.handle
+    await q.open()
 
     # 2. Init agents
     tag = TrustAnchorAgent(
-        pool,
+        p,
         seed_trustee1,
         'trustee_wallet',
         None,
@@ -35,7 +36,7 @@ async def test_agents_direct(
         9700,
         'api/v0')
     sag = SRIAgent(
-        pool,
+        q,
         'SRI-Agent-0000000000000000000000',
         'sri-agent-wallet',
         None,
@@ -43,7 +44,7 @@ async def test_agents_direct(
         9701,
         'api/v0')
     obag = OrgBookAgent(
-        pool,
+        q,
         'The-Org-Book-Agent-0000000000000',
         'the-org-book-agent-wallet',
         None,
@@ -51,7 +52,7 @@ async def test_agents_direct(
         9702,
         'api/v0')
     bcrag = BCRegistrarAgent(
-        pool,
+        q,
         'BC-Registrar-Agent-0000000000000',
         'bc-registrar-agent-wallet',
         None,
@@ -233,24 +234,24 @@ async def test_agents_direct(
     await obag.close()
     await sag.close()
     await tag.close()
-    await pool.close()
+    await q.close()
+    await p.close()
 
 
-# noinspection PyUnusedLocal
-# @pytest.mark.asyncio
-async def x_test_agents_process_forms_local(
+#noinspection PyUnusedLocal
+@pytest.mark.asyncio
+async def test_agents_process_forms_local(
         pool_name,
         pool_genesis_txn_path,
         seed_trustee1,
         pool_genesis_txn_file,
-        claims_endpoint,
-        service_endpoint,
         path_home):
 
     # 1. Open pool, init agents
-    async with NodePool(pool_name, pool_genesis_txn_path) as pool, (
+    async with NewPool(pool_name, pool_genesis_txn_path) as p, (
+            LivePool(p.name, p.handle)) as q, (
             TrustAnchorAgent(
-                pool,
+                q,
                 seed_trustee1,
                 'trustee_wallet',
                 None,
@@ -258,7 +259,7 @@ async def x_test_agents_process_forms_local(
                 '9700',
                 'api/v0')) as tag, (
             SRIAgent(
-                pool,
+                q,
                 'SRI-Agent-0000000000000000000000',
                 'sri-agent-wallet',
                 None,
@@ -266,7 +267,7 @@ async def x_test_agents_process_forms_local(
                 9701,
                 'api/v0')) as sag, (
             OrgBookAgent(
-                pool,
+                q,
                 'The-Org-Book-Agent-0000000000000',
                 'org-book-agent-wallet',
                 None,
@@ -274,7 +275,7 @@ async def x_test_agents_process_forms_local(
                 9702,
                 'api/v0')) as obag, (
             BCRegistrarAgent(
-                pool,
+                q,
                 'BC-Registrar-Agent-0000000000000',
                 'bc-reg-agent-wallet',
                 None,
@@ -282,7 +283,7 @@ async def x_test_agents_process_forms_local(
                 9703,
                 'api/v0')) as bcrag:
 
-        assert pool.handle is not None
+        assert p.handle is not None
 
         # 2. Publish agent particulars to ledger if not yet present
         for ag in (tag, sag, obag, bcrag):

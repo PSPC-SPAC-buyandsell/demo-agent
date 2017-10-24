@@ -7,7 +7,7 @@ from rest_framework.parsers import JSONParser
 from rest_framework.views import APIView
 # from django.views import View
 from wrapper_api.serializers import UserSerializer
-from wrapper_api.config import config
+from wrapper_api.config import get_config
 from time import time as epoch
 
 import logging
@@ -33,4 +33,4 @@ class IndyPostView(APIView):
         asyncio.set_event_loop(loop)
 
         greeting = loop.run_until_complete(asyncio.gather(hello()))[0]
-        return Response({'greeting': greeting, 'recv_data': req.data, 'config': config})
+        return Response({'greeting': greeting, 'recv_data': req.data, 'config': get_config()})
