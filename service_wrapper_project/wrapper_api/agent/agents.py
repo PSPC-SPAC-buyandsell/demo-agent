@@ -4,7 +4,7 @@ from requests import post
 from time import time
 from typing import Set
 
-from wrapper_api.agent.nodepool import LivePool
+from wrapper_api.agent.nodepool import NodePool
 from wrapper_api.agent.util import claim_value_pair, prune_claims_json, ppjson
 
 import json
@@ -16,7 +16,7 @@ class BaseAgent:
     Base class for agent
     """
 
-    def __init__(self, pool: LivePool, seed: str, wallet_name: str, wallet_config: str) -> None:
+    def __init__(self, pool: NodePool, seed: str, wallet_name: str, wallet_config: str) -> None:
         """
         Initializer for agent. Does not open its wallet, only retains input parameters.
 
@@ -49,7 +49,7 @@ class BaseAgent:
         logger.debug('BaseAgent.__init__: <<<')
 
     @property
-    def pool(self) -> LivePool:
+    def pool(self) -> NodePool:
         """
         Accessor for node pool
 
@@ -312,7 +312,7 @@ class BaseListeningAgent(BaseAgent):
     """
 
     def __init__(self,
-            pool: LivePool,
+            pool: NodePool,
             seed: str,
             wallet_name: str,
             wallet_config: str,
@@ -1012,7 +1012,7 @@ class Prover(BaseListeningAgent):
     """
 
     def __init__(self,
-            pool: LivePool,
+            pool: NodePool,
             seed: str,
             wallet_name: str,
             wallet_config: str,

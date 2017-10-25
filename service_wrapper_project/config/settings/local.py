@@ -160,4 +160,3 @@ MEDIA_ROOT = str(APPS_DIR('media'))
 
 REST_FRAMEWORK = {
 }
-
