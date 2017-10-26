@@ -1,5 +1,4 @@
 from indy import pool, IndyError
-from indy.error import ErrorCode
 
 import json
 import logging

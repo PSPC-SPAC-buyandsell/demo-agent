@@ -37,7 +37,7 @@ SECRET_KEY = env(
     'DJANGO_SECRET_KEY',
     default='-ghfu-%2f%5&q%!k^ej9+qx5%pso!3(%6*mrb+-%2w=8ov73)-')
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = env.bool('DJANGO_DEBUG', True)
+DEBUG = env.bool('DJANGO_DEBUG', False)
 
 ALLOWED_HOSTS = ['*']
 
@@ -159,4 +159,11 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = str(APPS_DIR('media'))
 
 REST_FRAMEWORK = {
+}
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'TIMEOUT': None
+    }
 }

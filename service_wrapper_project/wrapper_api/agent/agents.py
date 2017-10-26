@@ -366,10 +366,15 @@ class BaseListeningAgent(BaseAgent):
         return self._schema_cache
 
     def _vet_keys(must: Set[str], have: Set[str], hint: str = '') -> None:
+        logger = logging.getLogger(__name__)
+        logger.debug('BaseListeningAgent._vet_keys: >>> must: {}, have: {}, hint: {}'.format(must, have, hint))
+
         if not must.issubset(have):
             x = ValueError('Bad token:{} missing keys {}'.format(' ' + hint, must - have))
             logger.exception(x)
             raise x
+
+        logger.debug('BaseListeningAgent._vet_keys: <<<')
 
     async def send_endpoint(self) -> str:
         """
@@ -513,7 +518,7 @@ class BaseListeningAgent(BaseAgent):
         """
 
         logger = logging.getLogger(__name__)
-        logger.debug('BaseListeningAgent.process_post: >>> form: {}'.format(form))
+        logger.debug('BaseListeningAgent.process_post: >>> form: : {}'.format(form))
 
         self.__class__._vet_keys({'type', 'data'}, set(form.keys()))  # all tokens need type and data
 
