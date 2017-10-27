@@ -12,9 +12,13 @@ import json
 import logging
 import requests
 
+
+PATH_PREFIX_SLASH='api/v0/'
+
+LOG_FORMAT='%(levelname)-8s || %(name)-12s || %(message)s'
 logging.basicConfig(
     level=logging.DEBUG,
-    format='%(levelname)-8s %(name)-12s %(message)s')
+    format=LOG_FORMAT)
 
 
 def _cleanup():
@@ -33,8 +37,15 @@ class WrapperApiConfig(AppConfig):
         logger = logging.getLogger(__name__)
 
         cfg = init_config()
+        base_api_url_path = PATH_PREFIX_SLASH.strip('/')
 
         role = (cfg['Agent']['role'] or '').lower().replace(' ', '')  # as a pool name, will be a dir: spaces are evil
+        handler = logging.FileHandler(pjoin(dirname(abspath(__file__)), 'log', '{}.log'.format(role)))
+        formatter = logging.Formatter(LOG_FORMAT)
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+
         p = None  # the node pool
         p = NodePool('pool.{}'.format(role), cfg['Pool']['genesis.txn.path'])
         do(p.open())
@@ -51,9 +62,10 @@ class WrapperApiConfig(AppConfig):
                 None,
                 cfg['Agent']['host'],
                 int(cfg['Agent']['port']),
-                cfg['Common']['base.api.url.path'].strip('/'))
+                base_api_url_path)
             do(ag.open())
             assert ag.did
+            tag_did = ag.did
             
             # register trust anchor if need be
             if not json.loads(do(ag.get_nym(ag.did))):
@@ -61,11 +73,13 @@ class WrapperApiConfig(AppConfig):
             if not json.loads(do(ag.get_endpoint(ag.did))):
                 do(ag.send_endpoint())
 
-            # send schema if need be
-            if not json.loads(do(ag.get_schema(
+            # send schema if need be, seeding schema cache en passant
+            with open(pjoin(dirname(abspath(__file__)), 'protocol', 'schema-lookup.json'), 'r') as proto:
+                j = proto.read()
+            if not json.loads(do(ag.process_post(json.loads(j % (
                     ag.did,
                     cfg['Schema']['name'],
-                    cfg['Schema']['version']))):
+                    cfg['Schema']['version']))))):
                 with open(pjoin(dirname(abspath(__file__)), 'protocol', 'schema-send.json'), 'r') as proto:
                     j = proto.read()
                 schema = do(ag.process_post(json.loads(j % (
@@ -85,7 +99,7 @@ class WrapperApiConfig(AppConfig):
                     None,
                     cfg['Agent']['host'],
                     int(cfg['Agent']['port']),
-                    cfg['Common']['base.api.url.path'].strip('/'))
+                    base_api_url_path)
             elif role == 'the-org-book':
                 ag = OrgBookAgent(
                     p,
@@ -94,7 +108,7 @@ class WrapperApiConfig(AppConfig):
                     None,
                     cfg['Agent']['host'],
                     int(cfg['Agent']['port']),
-                    cfg['Common']['base.api.url.path'].strip('/'))
+                    PATH_PREFIX_SLASH.strip('/'))
             elif role == 'bc-registrar':
                 ag = BCRegistrarAgent(
                     p,
@@ -103,20 +117,20 @@ class WrapperApiConfig(AppConfig):
                     None,
                     cfg['Agent']['host'],
                     int(cfg['Agent']['port']),
-                    cfg['Common']['base.api.url.path'].strip('/'))
+                    base_api_url_path)
 
             do(ag.open())
             logging.debug("check {} 2: ag class {}".format(role, ag.__class__.__name__))
 
             trust_anchor_host = cfg['Trust Anchor']['host']
             trust_anchor_port = cfg['Trust Anchor']['port']
-            base_api_url_path = cfg['Common']['base.api.url.path']
 
             # trust anchor DID is necessary
             logging.debug("check {} 3".format(role))
             r = requests.get('http://{}:{}/{}/did'.format(trust_anchor_host, trust_anchor_port, base_api_url_path))
             r.raise_for_status()
             tag_did = r.json()
+            assert tag_did
 
             logging.debug("== check {} 4, tag_did {}".format(role, tag_did))
             # get nym: if not registered; get trust-anchor host & port, post an agent-nym-send form
@@ -134,19 +148,22 @@ class WrapperApiConfig(AppConfig):
             if not json.loads(do(ag.get_endpoint(ag.did))):
                 do(ag.send_endpoint())
 
-            # lookup schema
+            # Post a schema_lookup, seeding schema cache and obviating need to specify schema in POST messages
             with open(pjoin(dirname(abspath(__file__)), 'protocol', 'schema-lookup.json'), 'r') as proto:
                 j = proto.read()
-            schema_json = do(ag.get_schema(
+            schema_json = do(ag.process_post(json.loads(j % (
                 tag_did,
                 cfg['Schema']['name'],
-                cfg['Schema']['version']))
-            assert json.dumps(schema_json)
+                cfg['Schema']['version']))))
+            assert json.loads(schema_json)
 
             logging.debug("\n== check {} 6".format(role))
             if role == 'the-org-book':
                 # set master secret
-                do(ag.create_master_secret(cfg['Agent']['master.secret']))
+                # FIXME - EXTREMELY JANKY WORKAROUND FOR DUPLICATE MASTER-SECRET BUG
+                from os import getpid
+                do(ag.create_master_secret(cfg['Agent']['master.secret'] + '.' + str(getpid())))
+                logging.error("FIX ^ THIS ^ HORROR ^")
                 logging.debug("\n== check {} 7".format(role))
 
             elif role in ('bc-registrar', 'sri'):
@@ -159,5 +176,7 @@ class WrapperApiConfig(AppConfig):
             raise ValueError('Unsupported agent role [{}]'.format(role))
 
         assert ag is not None
+        assert ag._schema_cache
+
         cache.set('agent', ag)
         atexit.register(_cleanup)

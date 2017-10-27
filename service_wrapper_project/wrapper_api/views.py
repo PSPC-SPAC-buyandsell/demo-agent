@@ -6,6 +6,7 @@ from rest_framework.parsers import JSONParser
 from rest_framework.views import APIView
 from time import time as epoch
 from wrapper_api.eventloop import do
+from wrapper_api.apps import PATH_PREFIX_SLASH
 from indy.error import IndyError
 
 import asyncio
@@ -14,8 +15,6 @@ import logging
 
 
 logger = logging.getLogger(__name__)
-
-PATH_PREFIX_SLASH='api/v0/'
 
 
 class ServiceWrapper(APIView):

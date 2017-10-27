@@ -10,8 +10,9 @@ import pytest
 
 from indy import wallet, pool, signus, ledger
 
-logging.basicConfig(level=logging.DEBUG)
 
+logging.basicConfig(level=logging.DEBUG)
+logging.getLogger("indy.libindy").setLevel(logging.ERROR)
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -66,14 +67,14 @@ def path_temp():
 
     if path.exists():
         logger.debug("path_temp: Cleanup tmp path: %s", path)
-        rmtree(str(path))
+        # rmtree(str(path))
 
     logger.debug("path_temp: yield: %r", path)
     yield path
 
     if path.exists():
         logger.debug("path_temp: Cleanup tmp path: %s", path)
-        rmtree(str(path))
+        # rmtree(str(path))
 
     logger.debug("path_temp: <<<")
 
@@ -87,14 +88,14 @@ def path_home() -> Path:
 
     if path.exists():
         logger.debug("path_home: Cleanup home path: %r", path)
-        rmtree(str(path))
+        # rmtree(str(path))
 
     logger.debug("path_home: yield: %r", path)
     yield path
 
     if path.exists():
         logger.debug("path_home: Cleanup home path: %r", path)
-        rmtree(str(path))
+        # rmtree(str(path))
 
     logger.debug("path_home: <<<")
 

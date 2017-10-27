@@ -132,6 +132,7 @@ async def test_agents_direct(
 
     # 6. Setup master secrets, claim reqs at Prover agents
     await obag.create_master_secret('MasterSecret')
+    await obag.store_claim_offer(bcrag.did, schema['seqNo'])
     claim_req_json = await obag.store_claim_req(bcrag.did, claim_def_json)
 
     print('\n\n\n=== 4 === claim req {}'.format(claim_req_json))
@@ -192,18 +193,18 @@ async def test_agents_direct(
     (claim_uuids_all, claims_found_json) = await obag.get_claims(json.dumps(by_attr))
     print("\n== 5 == claims by attr, no filter {}; {}".format(claim_uuids_all, ppjson(claims_found_json)))
     claims_found = json.loads(claims_found_json)
-    pc4_postfilt = plain_claims_for(claims_found, {'LegalName': claims[2]['LegalName'][0]})
-    print("\n== 6 == display claims filtered post-hoc matching {}:{}".format(
+    display_pruned_postfilt = plain_claims_for(claims_found, {'LegalName': claims[2]['LegalName'][0]})
+    print("\n== 6 == display claims filtered post-hoc matching {}: {}".format(
         claims[2]['LegalName'][0],
-        ppjson(pc4_postfilt)))
-    pruned = prune_claims_json({k for k in pc4_postfilt}, claims_found)
-    print("\n== 7 == stripped down {}".format(ppjson(pruned)))
+        ppjson(display_pruned_postfilt)))  # LegalName appears plain: we specified it to plain_claims_for()
+    display_pruned = prune_claims_json({k for k in display_pruned_postfilt}, claims_found)
+    print("\n== 7 == stripped down {}".format(ppjson(display_pruned)))
 
     filter_enc = {k: claims[2][k][1] for k in claims[2] if k in ('sriRegDate', 'busId')}
     (claim_uuids_filt, claims_found_json) = await obag.get_claims(json.dumps(by_attr), filter_enc)
     print("\n== 8 == claims by attr, filtered a priori {}; {}".format(claim_uuids_filt, ppjson(claims_found_json)))
-    assert set([*pc4_postfilt]) == claim_uuids_filt
-    assert len(pc4_postfilt) == 1
+    assert set([*display_pruned_postfilt]) == claim_uuids_filt
+    assert len(display_pruned_postfilt) == 1
 
     # 9. Prover responds to request for proof
     claim_uuid = claim_uuids_filt.pop()
@@ -455,7 +456,8 @@ async def test_agents_process_forms_local(
         await obag.process_post(schema_lookup_form)  # bootstrap prover with current schema
         claim_req_json = await obag.process_post(claim_hello_form)
         claim_req = json.loads(claim_req_json)
-        assert(claim_req)
+        assert claim_req
+        print('\n\n=== XX === claim-req from bc-rag->obag hello: {}'.format(ppjson(claim_req)))
 
         # 6. Issuer issue claims and store at prover: get claim req, create claim, store claim
         claims = [
@@ -531,13 +533,13 @@ async def test_agents_process_forms_local(
                 }
             }
         }))
-        print("\n== 3 == claims by attr, no filter, api-post {}".format(ppjson(claims_all)))
-        pc4_postfilt = plain_claims_for(claims_all['claims'], {'LegalName': claims[2]['LegalName']})
-        print("\n== 4 == display claims filtered post-hoc matching {}:{}".format(
+        print("\n== 3 == claims by attr, no filter, process-post {}".format(ppjson(claims_all)))
+        display_pruned_postfilt = plain_claims_for(claims_all['claims'], {'LegalName': claims[2]['LegalName']})
+        print("\n== 4 == display claims filtered post-hoc matching {}: {}".format(
             claims[2]['LegalName'],
-            ppjson(pc4_postfilt)))
-        pruned = prune_claims_json({k for k in pc4_postfilt}, claims_all['claims'])
-        print("\n== 5 == stripped down {}".format(ppjson(pruned)))
+            ppjson(display_pruned_postfilt)))  # LegalName appears plain: we specified it to plain_claims_for()
+        display_pruned = prune_claims_json({k for k in display_pruned_postfilt}, claims_all['claims'])
+        print("\n== 5 == stripped down {}".format(ppjson(display_pruned)))
 
         claims_prefilt_json = await obag.process_post({
             'type': 'claim-request',
@@ -552,16 +554,16 @@ async def test_agents_process_forms_local(
             }
         })
         claims_prefilt = json.loads(claims_prefilt_json)
-        print("\n== 6 == claims by attr, with filter a priori {}".format(ppjson(claims_prefilt)))
-        pc4_prefilt = plain_claims_for(claims_all['claims'])
-        print("\n== 7 == display claims filtered a priori matching {}:{}".format(
+        print("\n== 6 == claims by attr, with filter a priori, process-post {}".format(ppjson(claims_prefilt)))
+        display_pruned_prefilt = plain_claims_for(claims_prefilt['claims'])
+        print("\n== 7 == display claims filtered a priori matching {}: {}".format(
             claims[2]['LegalName'],
-            ppjson(pc4_prefilt)))
-        assert set([*pc4_postfilt]) == set([*pc4_prefilt])
-        assert len(pc4_postfilt) == 1
+            ppjson(display_pruned_prefilt)))  # LegalName appears encoded: we didn't specify it to plain_claims_for()
+        assert set([*display_pruned_postfilt]) == set([*display_pruned_prefilt])
+        assert len(display_pruned_postfilt) == 1
 
         # 8. Prover responds to request for proof
-        claim_uuid = set([*pc4_prefilt]).pop()
+        claim_uuid = set([*display_pruned_prefilt]).pop()  # TODO: allow claim-req/proof-req by claim_uuid handle
         proof_resp = json.loads(await obag.process_post({
             'type': 'proof-request',
             'data': {

@@ -491,7 +491,10 @@ class BaseListeningAgent(BaseAgent):
                     form['type']),
                 json=form)  # requests module json-encodes
             r.raise_for_status()
-            return r.json()
+
+            rv = json.dumps(r.json())  # requests module json-decodes
+            logger.debug('BaseListeningAgent._response_from_proxy: <<< {}'.format(rv))
+            return rv
 
         logger.debug('BaseListeningAgent._response_from_proxy: <<<')
         return None
@@ -663,7 +666,6 @@ class BaseListeningAgent(BaseAgent):
         logger.debug('BaseListeningAgent.process_post: <!< not this form type: {}'.format(form['type']))
         raise NotImplementedError('{} does not support token type {}'.format(self.__class__.__name__, form['type']))
 
-
     async def process_get_txn(self, txn: int) -> str:
         """
         Takes a request to find a transaction on the distributed ledger by its sequence number.
@@ -676,8 +678,9 @@ class BaseListeningAgent(BaseAgent):
         logger.debug('BaseListeningAgent.process_get_txn: >>> txn: {}'.format(txn))
 
         req_json = await ledger.build_get_txn_request(self.did, txn)
+        resp = json.loads(await ledger.submit_request(self.pool.handle, req_json))
 
-        rv = json.dumps(json.loads(await ledger.submit_request(self.pool.handle, req_json))['result']['data'])
+        rv = json.dumps(resp['result']['data'] or {})
         logger.debug('BaseListeningAgent.process_get_txn: <<< {}'.format(rv))
         return rv
 
@@ -691,22 +694,8 @@ class BaseListeningAgent(BaseAgent):
         logger = logging.getLogger(__name__)
         logger.debug('BaseListeningAgent.process_get_did: >>>')
 
-        rv = json.dumps(self.did)
+        rv = json.dumps(self.did or '{}')
         logger.debug('BaseListeningAgent.process_get_did: <<< {}'.format(rv))
-        return rv
-
-    async def process_get_pool(self) -> str:
-        """
-        Takes a request to get current agent's pool name and handle, returns json accordingly.
-
-        :return: json pool info
-        """
-
-        logger = logging.getLogger(__name__)
-        logger.debug('BaseListeningAgent.process_get_pool: >>>')
-
-        rv = json.dumps({'name': self.pool.name, 'handle': self.pool.handle})
-        logger.debug('BaseListeningAgent.process_get_pool: <<< {}'.format(rv))
         return rv
 
     def __repr__(self) -> str:
@@ -1076,6 +1065,26 @@ class Prover(BaseListeningAgent):
         self._master_secret = master_secret  # prover
         logger.debug('Prover.create_master_secret: <<<')
 
+    async def store_claim_offer(self, issuer_did: str, schema_seq_no: int) -> None:
+        """
+        Method for prover to store a claim offer in its wallet.
+        """
+
+        logger = logging.getLogger(__name__)
+        logger.debug('Prover.store_claim_offer: >>> issuer_did: {}, schema_seq_no: {}'.format(
+            issuer_did,
+            schema_seq_no))
+
+        await anoncreds.prover_store_claim_offer(
+            self.wallet_handle,
+            json.dumps({
+                'issuer_did': issuer_did,
+                'schema_seq_no': schema_seq_no
+            }))
+
+        logger.debug('Prover.store_claim_offer: <<<')
+
+
     async def store_claim_req(self, issuer_did: str, claim_def_json: str) -> str:
         """
         Method for prover to create a claim request and store it in its wallet.
@@ -1320,6 +1329,7 @@ class Prover(BaseListeningAgent):
             self.__class__._vet_keys({'issuer-did'}, set(form['data'].keys()), hint='data')
             schema_json = await self._schema_info(form['data'])
             schema = json.loads(schema_json)
+            await self.store_claim_offer(form['data']['issuer-did'], schema['seqNo'])
             claim_def_json = await self.get_claim_def(schema['seqNo'], form['data']['issuer-did'])
             await self.store_claim_req(form['data']['issuer-did'], claim_def_json)
 
