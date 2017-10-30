@@ -1,0 +1,39 @@
+@startuml
+skinparam ParticipantPadding 20
+skinparam BoxPadding 20
+
+title Claim Request Sequence
+
+box "Indy" #LightBlue
+    participant "Ledger" as ledger
+endbox
+
+actor "Prover/Holder\n(The Org Book)\nAgent" as obag
+actor "Verifier\n(SRI)\nAgent" as sag
+actor "Actuator" as ator
+
+ator -> obag: GET <get-did>
+obag --> ator: DID
+
+=== CLAIM REQUEST SEQUENCE ==
+note over ledger, ator
+All agent service wrapper APIs are up
+Schema, claim definitions are on ledger
+Claim load sequence has stored claims at Prover/Holder
+endnote
+
+ator -> sag: POST <claim-request> on filter, proxy by Prover/Holder DID
+sag -> ledger: get endpoint for Prover/Holder DID
+ledger --> sag: Prover/Holder endpoint
+sag --> obag: POST <claim-request>
+obag -> obag: get claims
+obag --> sag: claims
+sag --> ator:  claims
+
+loop for each claim
+    ator -> ator: plain_claims_for(more filtration)
+    ator -> ator: select claim of interest
+    ator -> ator: prune_claims_json(claim_uuid)
+end
+
+@enduml

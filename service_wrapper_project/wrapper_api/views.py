@@ -33,7 +33,6 @@ class ServiceWrapper(APIView):
             form = json.loads(req.body.decode("utf-8"))
             rv_json = do(ag.process_post(form))
             return Response(json.loads(rv_json))  # FIXME: this only loads it to dump it: it's already json
-            
         except Exception as e:
             return Response(
                 status=500,
@@ -41,6 +40,8 @@ class ServiceWrapper(APIView):
                     'error-code': e.error_code if isinstance(e, IndyError) else 500,
                     'message': str(e)
                 })
+        finally:
+            cache.set('agent', ag)  #  in case agent state changes over process_post
 
     def get(self, req, seq_no=None):
         """

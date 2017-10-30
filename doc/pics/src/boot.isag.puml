@@ -1,0 +1,49 @@
+@startuml
+skinparam ParticipantPadding 20
+skinparam BaloxPadding 20
+
+title Issuer Agent Boot Sequence
+
+
+box "Indy" #LightBlue
+    participant "Ledger" as ledger
+    actor "Trust Anchor\n(Origin)\nAgent" as tag
+    actor "Prover/Holder\n(The Org Book)\nAgent" as obag
+    actor "Issuer\n(BC Registrar, SRI)\nAgent" as isag
+endbox
+
+=== BOOTSTRAP ==
+note over ledger, isag
+Trust anchor agent service wrapper API is up
+Prover/Holder agent service wrapper API is up
+endnote
+
+isag -> tag: get DID
+tag --> isag: trust anchor DID
+
+isag -> ledger: Look up own nym
+alt Nym present
+    ledger --> isag: nym
+else Nym not present
+    isag -[#blue]> tag: POST <agent-nym-send>
+    tag -[#blue]> ledger: send Issuer nym
+    ledger --[#blue]> tag: Issuer nym
+    tag --[#blue]> isag: Issuer nym
+end
+
+isag -> ledger: Look up endpoint attribution
+alt Endpoint attribution present
+    ledger --> isag: agent endpoint
+else Endpoint attribution not present
+    isag -[#blue]> ledger: send agent endpoint
+    ledger --[#blue]> isag: agent endpoint
+end
+
+isag -> ledger: look up schema
+ledger --> isag: schema
+isag -> isag: cache schema
+
+isag -> ledger: send claim definition
+ledger --> isag: returns
+
+@enduml

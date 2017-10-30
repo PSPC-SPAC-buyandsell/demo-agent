@@ -1,8 +1,8 @@
 from indy import agent, anoncreds, ledger, signus, pool, wallet, IndyError
 from indy.error import ErrorCode
-from wrapper_api.agent.nodepool import NodePool
-from wrapper_api.agent.demo_agents import TrustAnchorAgent, SRIAgent, OrgBookAgent, BCRegistrarAgent
-from wrapper_api.agent.util import claim_value_pair, ppjson, plain_claims_for, prune_claims_json
+from ..agent.nodepool import NodePool
+from ..agent.demo_agents import TrustAnchorAgent, SRIAgent, OrgBookAgent, BCRegistrarAgent
+from ..agent.util import claim_value_pair, ppjson, plain_claims_for, prune_claims_json
 
 import pytest
 import json

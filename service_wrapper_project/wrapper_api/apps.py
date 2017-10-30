@@ -160,10 +160,9 @@ class WrapperApiConfig(AppConfig):
             logging.debug("\n== check {} 6".format(role))
             if role == 'the-org-book':
                 # set master secret
-                # FIXME - EXTREMELY JANKY WORKAROUND FOR DUPLICATE MASTER-SECRET BUG
                 from os import getpid
-                do(ag.create_master_secret(cfg['Agent']['master.secret'] + '.' + str(getpid())))
-                logging.error("FIX ^ THIS ^ HORROR ^")
+                do(ag.create_master_secret(cfg['Agent']['master.secret'] + '.' + str(getpid())))  # TODO: awful!
+                logging.error("FIX ^ THIS ^ WORKAROUND ^ FOR ^ DUPLICATE ^ MASTER ^ SECRET")
                 logging.debug("\n== check {} 7".format(role))
 
             elif role in ('bc-registrar', 'sri'):

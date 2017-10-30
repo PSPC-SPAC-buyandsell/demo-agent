@@ -1,11 +1,12 @@
-from indy import agent, anoncreds, ledger, signus, pool, wallet, IndyError
-from indy.error import ErrorCode
+from indy import anoncreds, ledger
+from re import match
 from requests import post
 from time import time
 from typing import Set
 
-from wrapper_api.agent.nodepool import NodePool
-from wrapper_api.agent.util import claim_value_pair, prune_claims_json, ppjson
+from .wallet import Wallet
+from .nodepool import NodePool
+from .util import encode, decode, prune_claims_json, ppjson
 
 import json
 import logging
@@ -16,35 +17,25 @@ class BaseAgent:
     Base class for agent
     """
 
-    def __init__(self, pool: NodePool, seed: str, wallet_name: str, wallet_config: str) -> None:
+    def __init__(self, pool: NodePool, seed: str, wallet_base_name: str, wallet_cfg_json: str) -> None:
         """
         Initializer for agent. Does not open its wallet, only retains input parameters.
 
         :param pool: node pool on which agent operates
         :param seed: seed to bootstrap agent
-        :param wallet_name: name of wallet that agent uses
-        :param wallet_config: wallet configuration json, None for default
+        :param wallet_base_name: (base) name of wallet that agent uses
+        :param wallet_cfg_json: wallet configuration json, None for default
         """
 
         logger = logging.getLogger(__name__)
-        logger.debug('BaseAgent.__init__: >>> pool {}, seed {}, wallet_name {}, wallet_config {}'.format(
+        logger.debug('BaseAgent.__init__: >>> pool {}, seed [SEED], wallet_base_name {}, wallet_cfg_json {}'.format(
             pool,
-            seed,
-            wallet_name,
-            wallet_config))
+            wallet_base_name,
+            wallet_cfg_json))
 
         self._pool = pool
 
-        self._seed = seed
-        self._did_seed = json.dumps({'seed': seed})
-
-        self._wallet_name = wallet_name
-        self._wallet_handle = None
-        self._wallet_config = wallet_config
-
-        self._did = None
-        self._verkey = None
-        self._pubkey = None
+        self._wallet = Wallet(pool.name, seed, wallet_base_name, 0, wallet_cfg_json)
 
         logger.debug('BaseAgent.__init__: <<<')
 
@@ -59,34 +50,14 @@ class BaseAgent:
         return self._pool
 
     @property
-    def wallet_name(self) -> str:
+    def wallet(self) -> 'Wallet':
         """
-        Accessor for wallet name
+        Accessor for wallet
 
-        :return: wallet name
-        """
-
-        return self._wallet_name
-
-    @property
-    def wallet_handle(self) -> int:
-        """
-        Accessor for wallet handle
-
-        :return: wallet handle
+        :return: wallet
         """
 
-        return self._wallet_handle
-
-    @property
-    def wallet_config(self) -> str:
-        """
-        Accessor for wallet config json
-
-        :return: wallet config json
-        """
-
-        return self._wallet_config
+        return self._wallet
 
     @property
     def did(self) -> str:
@@ -96,7 +67,7 @@ class BaseAgent:
         :return: agent DID
         """
 
-        return self._did
+        return self.wallet.did
 
     @property
     def verkey(self) -> str:
@@ -106,7 +77,7 @@ class BaseAgent:
         :return: agent verification key
         """
 
-        return self._verkey
+        return self.wallet.verkey
 
     @property
     def pubkey(self) -> str:
@@ -116,7 +87,7 @@ class BaseAgent:
         :return: agent public (encryption) key
         """
 
-        return self._pubkey
+        return self.wallet.pubkey
 
     async def __aenter__(self) -> 'BaseAgent':
         """
@@ -145,28 +116,14 @@ class BaseAgent:
         logger = logging.getLogger(__name__)
         logger.debug('BaseAgent.open: >>>')
 
-        try:
-            await wallet.create_wallet(
-                pool_name=self.pool.name,
-                name=self.wallet_name,
-                xtype=None,
-                config=self.wallet_config,
-                credentials=None)
-        except IndyError as e:
-            if e.error_code != ErrorCode.WalletAlreadyExistsError:
-                logger.exception(e)
-                raise
-        self._wallet_handle = await wallet.open_wallet(self.wallet_name, self.wallet_config, None)
-
-        (self._did, self._verkey, self._pubkey) = (
-            await signus.create_and_store_my_did(self.wallet_handle, self._did_seed))
+        await self.wallet.open()
 
         logger.debug('BaseAgent.open: <<<')
         return self
 
     async def __aexit__(self, exc_type, exc, traceback) -> None:
         """
-        Context manager exit. Closes wallet; cleans up.
+        Context manager exit. Closes and deletes wallet.
         For use in monolithic call opening, using, and closing the agent.
 
         :param exc_type:
@@ -182,14 +139,15 @@ class BaseAgent:
 
     async def close(self) -> None:
         """
-        Explicit exit. Closes wallet; cleans up.
+        Explicit exit. Closes and deletes wallet.
         For use when keeping agent open across multiple calls.
         """
 
         logger = logging.getLogger(__name__)
         logger.debug('BaseAgent.close: >>>')
 
-        await wallet.close_wallet(self.wallet_handle)
+        await self.wallet.close()
+
         logger.debug('BaseAgent.close: <<<')
 
     async def get_nym(self, did: str) -> str:
@@ -283,12 +241,11 @@ class BaseAgent:
         :return: representation for current object
         """
 
-        return '{}({}, {}, {}, {})'.format(
+        return '{}({}, [SEED], {}, {})'.format(
             self.__class__.__name__,
             repr(self.pool),
-            '[SEED]',
-            self.wallet_name,
-            self.wallet_config)
+            self.wallet.base_name,
+            self.wallet.cfg_json)
 
     def __str__(self) -> str:
         """
@@ -297,7 +254,7 @@ class BaseAgent:
         :return: string identifying current object
         """
 
-        return '{}({})'.format(self.__class__.__name__, self.wallet_name)
+        return '{}({})'.format(self.__class__.__name__, self.wallet.base_name)
 
 
 class BaseListeningAgent(BaseAgent):
@@ -314,8 +271,8 @@ class BaseListeningAgent(BaseAgent):
     def __init__(self,
             pool: NodePool,
             seed: str,
-            wallet_name: str,
-            wallet_config: str,
+            wallet_base_name: str,
+            wallet_cfg_json: str,
             host: str,
             port: int,
             agent_api_path: str = '') -> None:
@@ -324,8 +281,8 @@ class BaseListeningAgent(BaseAgent):
 
         :pool: node pool on which agent operates
         :seed: seed to bootstrap agent
-        :wallet_name: name of wallet that agent uses
-        :wallet_config: wallet configuration json, None for default
+        :wallet_base_name: (base) name of wallet that agent uses
+        :wallet_cfg_json: wallet configuration json, None for default
         :host: agent IP address
         :port: agent port
         :agent_api_path: URL path to agent API, for use in proxying to further agents
@@ -335,13 +292,13 @@ class BaseListeningAgent(BaseAgent):
         logger.debug('BaseListeningAgent.__init__: >>> ' +
             'pool: {}, ' +
             'seed: [SEED], ' +
-            'wallet_name: {}, ' +
-            'wallet_config: {}, ' +
+            'wallet_base_name: {}, ' +
+            'wallet_cfg_json: {}, ' +
             'host: {}, ' +
             'port: {}, ' +
-            'agent_api_path: {}'.format(pool, wallet_name, wallet_config, host, port, agent_api_path))
+            'agent_api_path: {}'.format(pool, wallet_base_name, wallet_cfg_json, host, port, agent_api_path))
 
-        super().__init__(pool, seed, wallet_name, wallet_config)
+        super().__init__(pool, seed, wallet_base_name, wallet_cfg_json)
         self._host = host
         self._port = port
         self._agent_api_path = agent_api_path
@@ -396,7 +353,7 @@ class BaseListeningAgent(BaseAgent):
         })
         req_json = await ledger.build_attrib_request(self.did, self.did, None, raw_json, None)
 
-        rv = await ledger.sign_and_submit_request(self.pool.handle, self.wallet_handle, self.did, req_json)
+        rv = await ledger.sign_and_submit_request(self.pool.handle, self.wallet.handle, self.did, req_json)
         logger.debug('BaseListeningAgent.send_endpoint: <<< {}'.format(rv))
         return rv
 
@@ -705,12 +662,11 @@ class BaseListeningAgent(BaseAgent):
         :return: representation for current object
         """
 
-        return '{}({}, {}, {}, {}, {}, {})'.format(
+        return '{}({}, [SEED], {}, {}, {}, {})'.format(
             self.__class__.__name__,
             repr(self.pool),
-            '[SEED]',
-            self.wallet_name,
-            self.wallet_config,
+            self.wallet.base_name,
+            self.wallet.cfg_json,
             self.host,
             self.port)
 
@@ -739,7 +695,7 @@ class AgentRegistrar(BaseListeningAgent):
             None)
         await ledger.sign_and_submit_request(
             self.pool.handle,
-            self.wallet_handle,
+            self.wallet.handle,
             self.did,
             req_json)
 
@@ -814,7 +770,7 @@ class Origin(BaseListeningAgent):
         logger.debug('Origin.send_schema: >>> schema_data_json: {}'.format(schema_data_json))
 
         req_json = await ledger.build_schema_request(self.did, schema_data_json)
-        resp_json = await ledger.sign_and_submit_request(self.pool.handle, self.wallet_handle, self.did, req_json)
+        resp_json = await ledger.sign_and_submit_request(self.pool.handle, self.wallet.handle, self.did, req_json)
         resp = (json.loads(resp_json))['result']
 
         rv = await self.get_schema(resp['identifier'], resp['data']['name'], resp['data']['version'])
@@ -900,7 +856,7 @@ class Issuer(BaseListeningAgent):
 
         schema = json.loads(schema_json)
         claim_def_json = await anoncreds.issuer_create_and_store_claim_def(
-            self.wallet_handle,
+            self.wallet.handle,
             self.did,  # issuer DID
             schema_json,
             'CL',
@@ -913,7 +869,7 @@ class Issuer(BaseListeningAgent):
             json.dumps(json.loads(claim_def_json)['data']))
         resp_json = await ledger.sign_and_submit_request(
             self.pool.handle,
-            self.wallet_handle,
+            self.wallet.handle,
             self.did,
             req_json)
         data = (json.loads(resp_json))['result']['data']
@@ -944,7 +900,7 @@ class Issuer(BaseListeningAgent):
         logger.debug('Issuer.create_claim: >>> claim_req_json: {}, claim: {}'.format(claim_req_json, claim))
 
         rv = await anoncreds.issuer_create_claim(
-            self.wallet_handle,
+            self.wallet.handle,
             claim_req_json,
             json.dumps(claim),
             -1)
@@ -991,7 +947,12 @@ class Issuer(BaseListeningAgent):
             # it's local, carry on (no use case for proxying)
             _, rv = await self.create_claim(
                 json.dumps(form['data']['claim-req']),
-                {k: claim_value_pair(form['data']['claim-attrs'][k]) for k in form['data']['claim-attrs']})
+                {k:
+                    [
+                        str(form['data']['claim-attrs'][k]),
+                        encode(form['data']['claim-attrs'][k])
+                    ] for k in form['data']['claim-attrs']
+                })
             logger.debug('Issuer.process_post: <<< {}'.format(rv))
             return rv  # TODO: support revocation -- this return value will change
 
@@ -1008,8 +969,8 @@ class Prover(BaseListeningAgent):
     def __init__(self,
             pool: NodePool,
             seed: str,
-            wallet_name: str,
-            wallet_config: str,
+            wallet_base_name: str,
+            wallet_cfg_json: str,
             host: str,
             port: int,
             agent_api_path: str = '') -> None:
@@ -1018,8 +979,8 @@ class Prover(BaseListeningAgent):
 
         :pool: node pool on which agent operates
         :seed: seed to bootstrap agent
-        :wallet_name: name of wallet that agent uses
-        :wallet_config: wallet configuration json, None for default
+        :wallet_base_name: (base) name of wallet that agent uses
+        :wallet_cfg_json: wallet configuration json, None for default
         :host: agent IP address
         :port: agent port
         :agent_api_path: URL path to agent API, for use in proxying to further agents
@@ -1029,13 +990,13 @@ class Prover(BaseListeningAgent):
         logger.debug('Prover.__init__: >>> ' +
             'pool: {}, ' +
             'seed: [SEED], ' +
-            'wallet_name: {}, ' +
-            'wallet_config: {}, ' +
+            'wallet_base_name: {}, ' +
+            'wallet_cfg_json: {}, ' +
             'host: {}, ' +
             'port: {}, ' +
-            'agent_api_path: {}'.format(pool, wallet_name, wallet_config, host, port, agent_api_path))
+            'agent_api_path: {}'.format(pool, wallet_base_name, wallet_cfg_json, host, port, agent_api_path))
 
-        super().__init__(pool, seed, wallet_name, wallet_config, host, port, agent_api_path)
+        super().__init__(pool, seed, wallet_base_name, wallet_cfg_json, host, port, agent_api_path)
         self._master_secret = None
         self._claim_req_json = None  # FIXME: support multiple schema, use dict: txn_no -> claim_req_json
 
@@ -1061,7 +1022,7 @@ class Prover(BaseListeningAgent):
         logger = logging.getLogger(__name__)
         logger.debug('Prover.create_master_secret: >>> master_secret {}'.format(master_secret))
 
-        await anoncreds.prover_create_master_secret(self.wallet_handle, master_secret)
+        await anoncreds.prover_create_master_secret(self.wallet.handle, master_secret)
         self._master_secret = master_secret  # prover
         logger.debug('Prover.create_master_secret: <<<')
 
@@ -1076,7 +1037,7 @@ class Prover(BaseListeningAgent):
             schema_seq_no))
 
         await anoncreds.prover_store_claim_offer(
-            self.wallet_handle,
+            self.wallet.handle,
             json.dumps({
                 'issuer_did': issuer_did,
                 'schema_seq_no': schema_seq_no
@@ -1105,7 +1066,7 @@ class Prover(BaseListeningAgent):
             raise x
 
         rv = await anoncreds.prover_create_and_store_claim_req(
-            self.wallet_handle,
+            self.wallet.handle,
             self.did,
             json.dumps({
                 'issuer_did': issuer_did,
@@ -1128,7 +1089,7 @@ class Prover(BaseListeningAgent):
         logger = logging.getLogger(__name__)
         logger.debug('Prover.store_claim: >>> claim_json: {}'.format(claim_json))
 
-        await anoncreds.prover_store_claim(self.wallet_handle, claim_json)
+        await anoncreds.prover_store_claim(self.wallet.handle, claim_json)
         logger.debug('Prover.store_claim: <<<')
 
     async def create_proof(self,
@@ -1203,7 +1164,7 @@ class Prover(BaseListeningAgent):
 
         # TODO: support filter by claim-uuid -- very doable
         rv = await anoncreds.prover_create_proof(
-            self.wallet_handle,
+            self.wallet.handle,
             proof_req_json,
             json.dumps(requested_claims),
             json.dumps({  # schemas_json
@@ -1264,7 +1225,7 @@ class Prover(BaseListeningAgent):
         logger = logging.getLogger(__name__)
         logger.debug('Prover.get_claims: >>> proof_req_json: {}, filter_enc: {}'.format(proof_req_json, filter_enc))
 
-        claims_for_proof_json = await anoncreds.prover_get_claims_for_proof_req(self.wallet_handle, proof_req_json)
+        claims_for_proof_json = await anoncreds.prover_get_claims_for_proof_req(self.wallet.handle, proof_req_json)
         claims_for_proof = json.loads(claims_for_proof_json)
         claim_uuids = set()
         # retain only claim(s) of interest: find corresponding claim uuid(s)
@@ -1289,6 +1250,37 @@ class Prover(BaseListeningAgent):
 
         rv = (claim_uuids, json.dumps(claims_for_proof))
         logger.debug('Prover.get_claims: <<< {}'.format(rv))
+        return rv
+
+    async def reset_wallet(self) -> int:
+        """
+        Method for Prover to close and delete wallet, then create and open a new one.
+        Useful for demo purpose so as not to have to shut down and restart the Prover from django.
+        Precursor to revocation, and issuer/filter-specifiable claim deletion.
+
+        :return: wallet num
+        """
+
+        logger = logging.getLogger(__name__)
+        logger.debug('Prover.reset_wallet: >>>')
+
+        if self._master_secret is None:
+            x = ValueError('Master secret is not set')
+            logger.exception(x)
+            raise x
+
+        _seed = self.wallet._seed
+        base_name = self.wallet.base_name
+        num = self.wallet.num
+        cfg_json = self.wallet.cfg_json
+        await self.wallet.close()
+        self._wallet = Wallet(self.pool.name, _seed, base_name, num + 1, cfg_json)
+        await self.wallet.open()
+
+        await self.create_master_secret(self._master_secret)  # carry over master secret to new wallet
+
+        rv = self.wallet.num
+        logger.debug('Prover.reset_wallet: <<< {}'.format(rv))
         return rv
 
     async def process_post(self, form: dict) -> str:
@@ -1366,7 +1358,7 @@ class Prover(BaseListeningAgent):
                 }
             }
             filter_enc = {
-                k: claim_value_pair(form['data']['claim-filter']['attr-match'][k])[1]
+                k: encode(form['data']['claim-filter']['attr-match'][k])
                     for k in form['data']['claim-filter']['attr-match']
             } if form['data']['claim-filter']['attr-match'] else None
             (claim_uuids, claims_found_json) = await self.get_claims(json.dumps(find_req), filter_enc)
@@ -1414,6 +1406,15 @@ class Prover(BaseListeningAgent):
 
             # base listening agent code handles all proxied requests: it's local, carry on
             await self.store_claim(json.dumps(form['data']['claim']))
+
+            rv = json.dumps({})
+            logger.debug('Prover.process_post: <<< {}'.format(rv))
+            return rv
+
+        elif form['type'] == 'claims-reset':
+            # it's local, carry on (no use case for proxying)
+            await self.reset_wallet()
+
             rv = json.dumps({})
             logger.debug('Prover.process_post: <<< {}'.format(rv))
             return rv

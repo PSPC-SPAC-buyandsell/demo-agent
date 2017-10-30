@@ -1,0 +1,43 @@
+@startuml
+skinparam ParticipantPadding 20
+skinparam BoxPadding 20
+
+title Proof/Verification Request Sequence
+
+box "Indy" #LightBlue
+    participant "Ledger" as ledger
+endbox
+
+actor "Prover/Holder\n(The Org Book)\nAgent" as obag
+actor "Verifier\n(SRI)\nAgent" as sag
+actor "Actuator" as ator
+
+ator -> obag: GET <get-did>
+obag --> ator: DID
+
+=== PROOF REQUEST SEQUENCE ==
+note over ledger, ator
+All agent service wrapper APIs are up
+Schema, claim definitions are on ledger
+Actuator has claim of interest by filters
+endnote
+
+ator -> sag: POST <proof-request> on filter, proxy by Prover/Holder DID
+sag -> ledger: get endpoint for Prover/Holder DID
+ledger --> sag: Prover/Holder endpoint
+sag --> obag: POST <proof-request>
+obag -> obag: get claim
+obag -> obag: create proof
+obag --> sag: proof
+sag --> ator: proof
+
+=== VERIFICATION REQUEST SEQUENCE ==
+ator -> sag: POST <verification-request>
+sag -> ledger: get schema
+ledger --> sag: schema
+sag -> ledger: get claim definition
+ledger --> sag: claim definition
+sag -> sag: verify proof
+sag -> ator: True or False
+
+@enduml

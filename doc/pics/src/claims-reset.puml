@@ -1,0 +1,34 @@
+@startuml
+skinparam ParticipantPadding 20
+skinparam BoxPadding 20
+
+title Claims Reset Sequence
+
+box "Indy" #LightBlue
+    participant "Ledger" as ledger
+endbox
+
+actor "Prover/Holder\n(The Org Book)\nAgent" as obag
+actor "Verifier\n(SRI)\nAgent" as sag
+actor "Actuator" as ator
+
+ator -> obag: GET <get-did>
+obag --> ator: DID
+
+=== CLAIMS RESET SEQUENCE ==
+note over ledger, ator
+All agent service wrapper APIs are up
+Schema, claim definitions are on ledger
+Claim load sequence has stored claims at Prover/Holder
+endnote
+
+ator -> sag: POST <claims-reset> on filter, proxy by Prover/Holder DID
+sag -> ledger: get endpoint for Prover/Holder DID
+ledger --> sag: Prover/Holder endpoint
+sag --> obag: POST <claims-reset>
+obag -> obag: reset wallet, master secret
+obag --> sag: returns
+sag --> ator:  returns
+
+@enduml
+

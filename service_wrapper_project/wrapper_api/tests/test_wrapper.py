@@ -1,12 +1,11 @@
 from configparser import ConfigParser
-from indy import agent, anoncreds, ledger, signus, pool, wallet, IndyError
-from indy.error import ErrorCode
 from os.path import abspath, dirname, isfile, join as pjoin
-from wrapper_api.agent.util import claim_value_pair, ppjson, plain_claims_for, prune_claims_json
+from ..agent.util import ppjson, plain_claims_for, prune_claims_json
 
 import json
 import pytest
 import requests
+
 
 def form_json(msg_type, args, proxy_did=None):
     assert all(isinstance(x, str) for x in args)
@@ -104,7 +103,17 @@ async def test_wrapper(
     print('\n\n=== X.0 === claim-req from bc-rag->obag hello: {}'.format(ppjson(claim_req)))
     """
 
-    # 3. issuer claim-hello; then create, store each claim
+    # 3. Prover responds to claims-reset directive, to restore state to base line
+    claims_reset_json = form_json(
+        'claims-reset',
+        ())
+    url = url_for(cfg['the-org-book']['Agent'], 'claims-reset')
+    r = requests.post(url, json=json.loads(claims_reset_json))
+    assert r.status_code == 200
+    reset_resp = r.json()
+    assert not reset_resp
+
+    # 4. issuer claim-hello; then create, store each claim
     claim_hello_json = form_json(
         'claim-hello',
         (did['bc-registrar'],),
@@ -114,7 +123,7 @@ async def test_wrapper(
     assert r.status_code == 200
     claim_req = r.json()
     assert claim_req
-    print('\n\n=== XX === claim-req through proxy bc-rag->obag hello: {}'.format(ppjson(claim_req)))
+    # print('\n\n=== XX === claim-req through proxy bc-rag->obag hello: {}'.format(ppjson(claim_req)))
 
     claims = [
         {
@@ -168,7 +177,7 @@ async def test_wrapper(
         assert r.status_code == 200
         # response is empty
 
-    # 4. Prover finds claims
+    # 5. Prover finds claims
     claim_req_all_json = form_json(
         'claim-request',
         (json.dumps({}),),
@@ -205,7 +214,7 @@ async def test_wrapper(
     assert set([*display_pruned_postfilt]) == set([*display_pruned_prefilt])
     assert len(display_pruned_postfilt) == 1
 
-    # 5. Prover responds to request for proof
+    # 6. Prover responds to request for proof
     claim_uuid = set([*display_pruned_prefilt]).pop()  # TODO: allow claim-req/proof-req by claim_uuid handle
     proof_req_json = form_json(
         'proof-request',
@@ -217,7 +226,7 @@ async def test_wrapper(
     proof_resp = r.json()
     assert proof_resp
 
-    # 6. Verifier verify proof
+    # 7. Verifier verify proof
     verification_req_json = form_json(
         'verification-request',
         (json.dumps(proof_resp['proof-req']),json.dumps(proof_resp['proof'])))
@@ -230,14 +239,14 @@ async def test_wrapper(
     print("\n== 6 == the proof verifies as {}".format(ppjson(verification_resp)))
     assert verification_resp
 
-    # 7. Exercise helper GET TXN call
+    # 8. Exercise helper GET TXN call
     url = url_for(cfg['sri']['Agent'], 'txn/{}'.format(schema['seqNo']))
     r = requests.get(url)
     assert r.status_code == 200
     assert r.json()
     print("\n== 7 == ledger transaction by seq no {}: {}".format(schema['seqNo'], ppjson(r.json())))
     
-    # 8. txn# non-existence case
+    # 9. txn# non-existence case
     url = url_for(cfg['sri']['Agent'], 'txn/99999')
     r = requests.get(url)  # ought not exist
     assert r.status_code == 200

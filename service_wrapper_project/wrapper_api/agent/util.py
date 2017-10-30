@@ -1,5 +1,5 @@
-from binascii import b2a_hex
-from functools import wraps
+from binascii import hexlify, unhexlify
+from math import ceil, log
 
 import json
 
@@ -11,17 +11,42 @@ def ppjson(dumpit):
 
     return json.dumps(json.loads(dumpit) if isinstance(dumpit, str) else dumpit, indent=4)
 
-
-def claim_value_pair(value):
+def encode(value):
     """
-    Encoder for raw values in claims, returns pair with stringified and encoded-to-int values
+    Encoder for claim values, returns encoded value.
+    Operation leaves any (stringified) int32 alone: indy-sdk predicate claims operate on int32
+    values properly only when their encoded values match their raw values.
+
+    To disambiguate for decoding, the function adds 2**32 to any non-trivial transform.
     """
 
     s = str(value)
-    return [
-        s,
-        s if s.isdigit() else str(int.from_bytes(b2a_hex(s.encode()), 'big'))
-    ]
+    try:
+        i = int(value)
+        if 0 <= i < 2**32:  # it's an i32, leave it (as numeric string)
+            return s
+    except (ValueError, TypeError):
+        pass
+
+    return str(int.from_bytes(hexlify(s.encode()), 'big') + 2**32)
+
+
+def decode(value: str):
+    """
+    Decoder for encoded claim values, returns decoded value.
+
+    :param value: numeric string to decode
+    """
+
+    assert value.isdigit()
+
+    if 0 <= int(value) < 2**32:  # it's an i32, leave it (as numeric string)
+        return value
+
+    i = int(value) - 2**32
+    blen = ceil(log(i, 16)/2)
+    ibytes = unhexlify(i.to_bytes(blen, 'big'))
+    return ibytes.decode()
 
 
 def plain_claims_for(claims: dict, filt: dict = {}) -> dict:
@@ -30,7 +55,7 @@ def plain_claims_for(claims: dict, filt: dict = {}) -> dict:
     json-loaded as returned via agent get_claims().
     
     The input claims holds claims with values encoded to numeric strings as per
-    claim_value_pair() above; this utility chooses only those matching the input original
+    encode() above; this utility chooses only those matching the input original
     (non-encoded) value, replacing any values for attributes in the filter with their
     respective plain (non-encoded) values for more cogent display.
 
@@ -111,12 +136,15 @@ def plain_claims_for(claims: dict, filt: dict = {}) -> dict:
         presents any filter attributes as plain, pre-encoding values that the indy-sdk does not recognize.
     """
     uuid2claims = claims['attrs']
-    encfilt = {k: claim_value_pair(filt[k])[1] for k in filt}
+    encfilt = {k: encode(filt[k]) for k in filt}
     matches = {}
     for claims in uuid2claims.values():
         for claim in claims:
             if claim['claim_uuid'] not in matches and (encfilt.items() <= claim['attrs'].items()):
-                matches[claim['claim_uuid']] = {k: filt[k] if k in filt else claim['attrs'][k] for k in claim['attrs']}
+                matches[claim['claim_uuid']] = {
+                    k: filt[k] if k in filt else decode(claim['attrs'][k])
+                    for k in claim['attrs']
+                }
     return matches
 
 

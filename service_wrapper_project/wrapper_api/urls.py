@@ -23,6 +23,7 @@ urlpatterns = [
         url(r'^claim-request', views.ServiceWrapper.as_view()),
         url(r'^proof-request', views.ServiceWrapper.as_view()),
         url(r'^verification-request', views.ServiceWrapper.as_view()),
+        url(r'^claims-reset', views.ServiceWrapper.as_view()),
     ])),
 ]
 

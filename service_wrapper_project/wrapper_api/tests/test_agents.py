@@ -1,11 +1,15 @@
 from indy import agent, anoncreds, ledger, signus, pool, wallet, IndyError
 from indy.error import ErrorCode
-from wrapper_api.agent.nodepool import NodePool
-from wrapper_api.agent.demo_agents import TrustAnchorAgent, SRIAgent, OrgBookAgent, BCRegistrarAgent
-from wrapper_api.agent.util import claim_value_pair, ppjson, plain_claims_for, prune_claims_json
+from ..agent.nodepool import NodePool
+from ..agent.demo_agents import TrustAnchorAgent, SRIAgent, OrgBookAgent, BCRegistrarAgent
+from ..agent.util import encode, ppjson, plain_claims_for, prune_claims_json
 
 import pytest
 import json
+
+
+def claim_value_pair(plain):
+    return [str(plain), encode(plain)]
 
 
 #noinspection PyUnusedLocal
@@ -132,6 +136,10 @@ async def test_agents_direct(
 
     # 6. Setup master secrets, claim reqs at Prover agents
     await obag.create_master_secret('MasterSecret')
+
+    wallet_num = obag.wallet.num
+    assert (await obag.reset_wallet()) > wallet_num  # makes sure later ops are OK on reset wallet
+
     await obag.store_claim_offer(bcrag.did, schema['seqNo'])
     claim_req_json = await obag.store_claim_req(bcrag.did, claim_def_json)
 
@@ -443,6 +451,7 @@ async def test_agents_process_forms_local(
                 'issuer-did': bcrag.did
             }
         }
+
         try:  # master secret unspecified, ought to fail
             await obag.process_post(claim_hello_form)
         except ValueError:
@@ -453,6 +462,14 @@ async def test_agents_process_forms_local(
             claim_req_json = await obag.process_post(claim_hello_form)
         except ValueError:
             pass
+
+        claims_reset_resp = json.loads(await obag.process_post({  # make sure later ops are OK on reset wallet
+            'type': 'claims-reset',
+            'data': {
+            }
+        }))
+        assert not claims_reset_resp
+
         await obag.process_post(schema_lookup_form)  # bootstrap prover with current schema
         claim_req_json = await obag.process_post(claim_hello_form)
         claim_req = json.loads(claim_req_json)

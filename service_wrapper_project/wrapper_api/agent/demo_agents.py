@@ -1,11 +1,6 @@
-from indy import agent, anoncreds, ledger, signus, pool, wallet, IndyError
-from indy.error import ErrorCode
 from requests import post
-from time import time
-from typing import Set
 
 from wrapper_api.agent.agents import AgentRegistrar, Origin, Verifier, Issuer, Prover
-from wrapper_api.agent.util import claim_value_pair, prune_claims_json, ppjson
 
 import json
 import logging
