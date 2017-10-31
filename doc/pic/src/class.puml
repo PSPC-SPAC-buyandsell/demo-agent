@@ -1,0 +1,127 @@
+@startuml
+
+title Class Diagram
+
+class Wallet {
+    -_seed
+    +pool_name
+    +base_name
+    +name
+    +num
+    +handle
+    +cfg_json
+    +did
+    +verkey
+    +pubkey
+}
+
+class NodePool {
+    +name
+    +genesis_txn_path
+    +handle
+    +open()
+    +close()
+}
+
+class BaseAgent {
+    +pool
+    +wallet
+    +did
+    +verkey
+    +pubkey
+    +open()
+    +close()
+    +get_nym()
+    +get_schema()
+    +get_endpoint()
+}
+
+class BaseListeningAgent {
+    +host
+    +port
+    +agent_api_path
+    +schema_cache
+    -_vet_keys()
+    -_schema_info()
+    -_response_from_proxy()
+    -_mro_dispatch()
+    +send_endpoint()
+    +get_claim_def()
+    +process_post()
+    +process_get_txn()
+    +process_get_did()
+}
+
+class AgentRegistrar {
+    +send_nym()
+    +process_post()
+}
+
+class Origin {
+    +send_schema()
+    +process_post()
+}
+
+class Issuer {
+    +send_claim_def()
+    +create_claim()
+    +process_post()
+}
+
+class Prover {
+    -_master_secret
+    +claim_req_json
+    +send_claim_def()
+    +create_claim()
+    +create_master_secret()
+    +store_claim_offer()
+    +store_claim_req()
+    +store_claim()
+    +create_proof()
+    +get_claims()
+    +reset_wallet()
+    +process_post()
+}
+
+class Verifier {
+    +verify_proof()
+    +process_post()
+}
+
+class TrustAnchorAgent {
+    +process_post()
+}
+
+class SRIAgent {
+    +process_post()
+}
+
+class BCRegistrarAgent {
+    +process_post()
+}
+
+class OrgBookAgent {
+    +process_post()
+}
+
+BaseAgent "1" *-left- "1" NodePool
+BaseAgent "1" *-right- "1" Wallet
+
+BaseAgent <|-down- BaseListeningAgent
+BaseListeningAgent <|-left- AgentRegistrar
+BaseListeningAgent <|-left- Origin
+BaseListeningAgent <|-right- Issuer
+BaseListeningAgent <|-down- Prover
+BaseListeningAgent <|-down- Verifier
+
+AgentRegistrar <|-down- TrustAnchorAgent
+Origin <|-down- TrustAnchorAgent
+
+Issuer <|-right- SRIAgent
+Verifier <|-right- SRIAgent
+
+Issuer <|- BCRegistrarAgent
+
+Prover <|-down- OrgBookAgent
+
+@enduml
