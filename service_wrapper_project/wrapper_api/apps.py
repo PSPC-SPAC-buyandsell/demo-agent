@@ -19,6 +19,9 @@ LOG_FORMAT='%(levelname)-8s || %(name)-12s || %(message)s'
 logging.basicConfig(
     level=logging.DEBUG,
     format=LOG_FORMAT)
+logging.getLogger('requests').setLevel(logging.ERROR)
+logging.getLogger('indy').setLevel(logging.WARNING)
+logging.getLogger('urllib3').setLevel(logging.CRITICAL)
 
 
 def _cleanup():
@@ -40,11 +43,13 @@ class WrapperApiConfig(AppConfig):
         base_api_url_path = PATH_PREFIX_SLASH.strip('/')
 
         role = (cfg['Agent']['role'] or '').lower().replace(' ', '')  # as a pool name, will be a dir: spaces are evil
+        """
         handler = logging.FileHandler(pjoin(dirname(abspath(__file__)), 'log', '{}.log'.format(role)))
         formatter = logging.Formatter(LOG_FORMAT)
         handler.setFormatter(formatter)
         logger.addHandler(handler)
         logger.setLevel(logging.DEBUG)
+        """
 
         p = None  # the node pool
         p = NodePool('pool.{}'.format(role), cfg['Pool']['genesis.txn.path'])

@@ -135,6 +135,7 @@ def plain_claims_for(claims: dict, filt: dict = {}) -> dict:
         is suitable for display and human inference, not for re-use in further protocol operations, since it
         presents any filter attributes as plain, pre-encoding values that the indy-sdk does not recognize.
     """
+
     uuid2claims = claims['attrs']
     encfilt = {k: encode(filt[k]) for k in filt}
     matches = {}
@@ -145,6 +146,7 @@ def plain_claims_for(claims: dict, filt: dict = {}) -> dict:
                     k: filt[k] if k in filt else decode(claim['attrs'][k])
                     for k in claim['attrs']
                 }
+
     return matches
 
 

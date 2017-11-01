@@ -333,66 +333,6 @@ class BaseListeningAgent(BaseAgent):
 
         logger.debug('BaseListeningAgent._vet_keys: <<<')
 
-    async def send_endpoint(self) -> str:
-        """
-        Sends agent endpoint attribute to ledger. Returns endpoint json as written
-        (the process of writing the attribute to the ledger does not add any additional content).
-
-        :return: endpoint attibute entry json with public key (which indy-sdk labels 'verkey')
-            and host address (string in format IP address:port)
-        """
-
-        logger = logging.getLogger(__name__)
-        logger.debug('BaseListeningAgent.send_endpoint: >>>')
-
-        raw_json = json.dumps({
-            'endpoint': {
-                'ha': '{}:{}'.format(self.host, self.port),
-                'verkey': self.pubkey
-            }
-        })
-        req_json = await ledger.build_attrib_request(self.did, self.did, None, raw_json, None)
-
-        rv = await ledger.sign_and_submit_request(self.pool.handle, self.wallet.handle, self.did, req_json)
-        logger.debug('BaseListeningAgent.send_endpoint: <<< {}'.format(rv))
-        return rv
-
-    async def get_claim_def(self, schema_seq_no: int, issuer_did: str) -> str:
-        """
-        Method to get claim definition from ledger by its parent schema and issuer DID;
-        empty production {} for none, IndyError with error_code = ErrorCode.LedgerInvalidTransaction
-        for bad request.
-
-        :param schema_seq_no: schema sequence number on the ledger
-        :param issuer_did: (claim def) issuer DID
-        :return: claim definition json as retrieved from ledger
-        """
-
-        logger = logging.getLogger(__name__)
-        logger.debug('BaseListeningAgent.get_claim_def: >>> schema_seq_no: {}, issuer_did: {}'.format(
-            schema_seq_no,
-            issuer_did))
-
-        req_json = await ledger.build_get_claim_def_txn(
-            self.did,
-            schema_seq_no,
-            'CL',
-            issuer_did)
-
-        resp_json = await ledger.submit_request(self.pool.handle, req_json)
-
-        resp = json.loads(resp_json)
-        data_json = (json.loads(resp_json))['result']['data']
-        if data_json is None:
-            return json.dumps({})  # not present, give back an empty production
-
-        if resp['result']['data']['revocation'] is not None:
-            resp['result']['data']['revocation'] = None  #TODO: support revocation
-
-        rv = json.dumps(resp['result'])
-        logger.debug('BaseListeningAgent.get_claim_def: <<< {}'.format(rv))
-        return rv
-
     async def _schema_info(self, form_data: dict) -> str:
         """
         Gets schema json for use in indy-sdk structures, reading it from cached property
@@ -466,6 +406,66 @@ class BaseListeningAgent(BaseAgent):
         rv.reverse()
 
         logger.debug('BaseListeningAgent._mro_dispatch: <<< {}'.format(rv))
+        return rv
+
+    async def send_endpoint(self) -> str:
+        """
+        Sends agent endpoint attribute to ledger. Returns endpoint json as written
+        (the process of writing the attribute to the ledger does not add any additional content).
+
+        :return: endpoint attibute entry json with public key (which indy-sdk labels 'verkey')
+            and host address (string in format IP address:port)
+        """
+
+        logger = logging.getLogger(__name__)
+        logger.debug('BaseListeningAgent.send_endpoint: >>>')
+
+        raw_json = json.dumps({
+            'endpoint': {
+                'ha': '{}:{}'.format(self.host, self.port),
+                'verkey': self.pubkey
+            }
+        })
+        req_json = await ledger.build_attrib_request(self.did, self.did, None, raw_json, None)
+
+        rv = await ledger.sign_and_submit_request(self.pool.handle, self.wallet.handle, self.did, req_json)
+        logger.debug('BaseListeningAgent.send_endpoint: <<< {}'.format(rv))
+        return rv
+
+    async def get_claim_def(self, schema_seq_no: int, issuer_did: str) -> str:
+        """
+        Method to get claim definition from ledger by its parent schema and issuer DID;
+        empty production {} for none, IndyError with error_code = ErrorCode.LedgerInvalidTransaction
+        for bad request.
+
+        :param schema_seq_no: schema sequence number on the ledger
+        :param issuer_did: (claim def) issuer DID
+        :return: claim definition json as retrieved from ledger
+        """
+
+        logger = logging.getLogger(__name__)
+        logger.debug('BaseListeningAgent.get_claim_def: >>> schema_seq_no: {}, issuer_did: {}'.format(
+            schema_seq_no,
+            issuer_did))
+
+        req_json = await ledger.build_get_claim_def_txn(
+            self.did,
+            schema_seq_no,
+            'CL',
+            issuer_did)
+
+        resp_json = await ledger.submit_request(self.pool.handle, req_json)
+
+        resp = json.loads(resp_json)
+        data_json = (json.loads(resp_json))['result']['data']
+        if data_json is None:
+            return json.dumps({})  # not present, give back an empty production
+
+        if resp['result']['data']['revocation'] is not None:
+            resp['result']['data']['revocation'] = None  #TODO: support revocation
+
+        rv = json.dumps(resp['result'])
+        logger.debug('BaseListeningAgent.get_claim_def: <<< {}'.format(rv))
         return rv
 
     async def process_post(self, form: dict) -> str:

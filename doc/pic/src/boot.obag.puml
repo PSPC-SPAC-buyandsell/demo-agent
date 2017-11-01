@@ -7,9 +7,9 @@ title Prover/Holder Agent Boot Sequence
 
 box "Indy" #LightBlue
     participant "Ledger" as ledger
-    actor "Trust Anchor\n(Origin)\nAgent" as tag
-    actor "Prover/Holder\n(The Org Book)\nAgent" as obag
 endbox
+actor "Trust Anchor\n(Origin)\nAgent" as tag
+actor "Prover/Holder\n(The Org Book)\nAgent" as obag
 
 === BOOTSTRAP ==
 note over ledger, obag
