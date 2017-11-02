@@ -31,7 +31,7 @@ obag -> ledger: get claim definition
 ledger --> obag: claim definition
 obag -> obag: store claim request
 obag --> bcrag: claim request
-obag --> ator: claim request
+bcrag --> ator: claim request
 
 loop for each claim
     ator -> bcrag: POST <claim-create>

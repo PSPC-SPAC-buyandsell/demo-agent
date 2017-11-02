@@ -69,8 +69,6 @@ class Issuer {
 class Prover {
     -_master_secret
     +claim_req_json
-    +send_claim_def()
-    +create_claim()
     +create_master_secret()
     +store_claim_offer()
     +store_claim_req()
