@@ -200,7 +200,7 @@ class BaseAgent:
         resp = json.loads(resp_json)
 
         data_json = (json.loads(resp_json))['result']['data']  # it's double-encoded on the ledger
-        if data_json is None:
+        if (not data_json) or ('attr_names' not in data_json):
             return json.dumps({})  # not present, give back an empty production
 
         resp['result']['data']['keys'] = resp['result']['data'].pop('attr_names')
