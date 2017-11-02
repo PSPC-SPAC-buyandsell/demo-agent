@@ -12,7 +12,7 @@ from indy import wallet, pool, signus, ledger
 
 
 logging.basicConfig(level=logging.DEBUG)
-logging.getLogger("indy").setLevel(logging.WARNING)
+logging.getLogger("indy").setLevel(logging.DEBUG)
 logging.getLogger("urllib3").setLevel(logging.ERROR)
 logging.getLogger("requests").setLevel(logging.ERROR)
 

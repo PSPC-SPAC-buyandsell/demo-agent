@@ -19,8 +19,8 @@ LOG_FORMAT='%(levelname)-8s || %(name)-12s || %(message)s'
 logging.basicConfig(
     level=logging.DEBUG,
     format=LOG_FORMAT)
+logging.getLogger('indy').setLevel(logging.INFO)
 logging.getLogger('requests').setLevel(logging.ERROR)
-logging.getLogger('indy').setLevel(logging.WARNING)
 logging.getLogger('urllib3').setLevel(logging.CRITICAL)
 
 
@@ -71,7 +71,7 @@ class WrapperApiConfig(AppConfig):
             do(ag.open())
             assert ag.did
             tag_did = ag.did
-            
+
             # register trust anchor if need be
             if not json.loads(do(ag.get_nym(ag.did))):
                 do(ag.send_nym(ag.did, ag.verkey))

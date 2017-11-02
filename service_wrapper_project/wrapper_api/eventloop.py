@@ -1,11 +1,10 @@
 import asyncio
 
-_loop = None
-
 def do(coro):
-    global _loop
-    if _loop is None:
-        _loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(_loop)
-    return _loop.run_until_complete(coro)
-
+    event_loop = None
+    try:
+        event_loop = asyncio.get_event_loop()
+    except RuntimeError:
+        event_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(event_loop)
+    return event_loop.run_until_complete(coro)

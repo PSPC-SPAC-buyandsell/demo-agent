@@ -12,6 +12,7 @@ from indy.error import IndyError
 import asyncio
 import json
 import logging
+import traceback
 
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ class ServiceWrapper(APIView):
             rv_json = do(ag.process_post(form))
             return Response(json.loads(rv_json))  # FIXME: this only loads it to dump it: it's already json
         except Exception as e:
+            traceback.print_exc()
             return Response(
                 status=500,
                 data={
