@@ -41,9 +41,8 @@ async def test_wallet(
     assert num != None
     assert w.did
     assert w.verkey
-    assert w.pubkey
 
-    (did, verkey, pubkey) = (w.did, w.verkey, w.pubkey)
+    (did, verkey) = (w.did, w.verkey)
     await w.close()
 
     num += 1
@@ -51,7 +50,6 @@ async def test_wallet(
     await x.open()
     assert did == x.did
     assert verkey == x.verkey
-    assert pubkey == x.pubkey
 
     await x.close()
     await p.close()

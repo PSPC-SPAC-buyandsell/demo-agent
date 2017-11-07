@@ -15,7 +15,6 @@ limitations under the License.
 """
 
 from django.conf.urls import url, include
-# from rest_framework import routers
 from wrapper_api import views
 
 
@@ -38,6 +37,8 @@ urlpatterns = [
         url(r'^claim-store', views.ServiceWrapper.as_view()),
         url(r'^claim-request', views.ServiceWrapper.as_view()),
         url(r'^proof-request', views.ServiceWrapper.as_view()),
+        url(r'^claim-request-by-claim-uuid', views.ServiceWrapper.as_view()),
+        url(r'^proof-request-by-claim-uuid', views.ServiceWrapper.as_view()),
         url(r'^verification-request', views.ServiceWrapper.as_view()),
         url(r'^claims-reset', views.ServiceWrapper.as_view()),
     ])),

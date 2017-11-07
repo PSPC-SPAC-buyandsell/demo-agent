@@ -38,7 +38,7 @@ Schema, claim definitions are on ledger
 Actuator has claim of interest by filters
 endnote
 
-ator -> sag: POST <proof-request> on filter, proxy by Prover/Holder DID
+ator -> sag: POST <proof-request> or <proof-request-by-claim-uuid>, proxy by Prover/Holder DID
 sag -> ledger: get endpoint for Prover/Holder DID
 ledger --> sag: Prover/Holder endpoint
 sag --> obag: POST <proof-request>

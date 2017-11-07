@@ -92,6 +92,7 @@ class Prover {
     +store_claim()
     +create_proof()
     +get_claims()
+    +get_claim_by_claim_uuid()
     +reset_wallet()
     +process_post()
 }

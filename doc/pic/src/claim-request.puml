@@ -46,10 +46,8 @@ obag -> obag: get claims
 obag --> sag: claims
 sag --> ator:  claims
 
-loop for each claim
-    ator -> ator: plain_claims_for(more filtration)
-    ator -> ator: select claim of interest
-    ator -> ator: prune_claims_json(claim_uuid)
-end
+ator -> ator: claims_for(more filtration)
+ator -> ator: select claim of interest/get claim_uuid
+ator -> ator: prune_claims_json(claim_uuid)
 
 @enduml

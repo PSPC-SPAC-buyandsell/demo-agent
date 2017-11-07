@@ -65,15 +65,10 @@ def decode(value: str):
     return ibytes.decode()
 
 
-def plain_claims_for(claims: dict, filt: dict = {}) -> dict:
+def claims_for(claims: dict, filt: dict = {}) -> dict:
     """
-    Find claims matching input attribute-value dict from within input claims structure,
+    Find indy-sdk claims matching input attribute-value dict from within input claims structure,
     json-loaded as returned via agent get_claims().
-    
-    The input claims holds claims with values encoded to numeric strings as per
-    encode() above; this utility chooses only those matching the input original
-    (non-encoded) value, replacing any values for attributes in the filter with their
-    respective plain (non-encoded) values for more cogent display.
 
     :param claims: claims structure via get_claims();
         e.g., {
@@ -83,8 +78,8 @@ def plain_claims_for(claims: dict, filt: dict = {}) -> dict:
                         "claim_uuid": "claim::00000000-0000-0000-0000-000000000000",
                         "attrs": {
                             "attr0": "2",
-                            "attr1": "8080189724314",
-                            "attr2": "110838914834142413139418734819234123943712834123947912834701743281470"
+                            "attr1": "Hello",
+                            "attr2": "World"
                         },
                         "issuer_did": "Q4zqM7aXqm7gDQkUVLng9h",
                         "schema_seq_no": 21
@@ -93,8 +88,8 @@ def plain_claims_for(claims: dict, filt: dict = {}) -> dict:
                         "claim_uuid": "claim::00000000-0000-0000-0000-111111111111",
                         "attrs": {
                             "attr0": "1",
-                            "attr1": "8080189724314",
-                            "attr2": "1"
+                            "attr1": "Nice",
+                            "attr2": "Tractor"
                         },
                         "issuer_did": "Q4zqM7aXqm7gDQkUVLng9h",
                         "schema_seq_no": 21
@@ -105,8 +100,8 @@ def plain_claims_for(claims: dict, filt: dict = {}) -> dict:
                         "claim_uuid": "claim::00000000-0000-0000-0000-000000000000",
                         "attrs": {
                             "attr0": "2",
-                            "attr1": "8080189724314",
-                            "attr2": "110838914834142413139418734819234123943712834123947912834701743281470"
+                            "attr1": "Hello",
+                            "attr2": "World"
                         },
                         "issuer_did": "Q4zqM7aXqm7gDQkUVLng9h",
                         "schema_seq_no": 21
@@ -115,8 +110,8 @@ def plain_claims_for(claims: dict, filt: dict = {}) -> dict:
                         "claim_uuid": "claim::00000000-0000-0000-0000-111111111111",
                         "attrs": {
                             "attr0": "1",
-                            "attr1": "8080189724314",
-                            "attr2": "1"
+                            "attr1": "Nice",
+                            "attr2": "Tractor"
                         },
                         "issuer_did": "Q4zqM7aXqm7gDQkUVLng9h",
                         "schema_seq_no": 21
@@ -127,8 +122,8 @@ def plain_claims_for(claims: dict, filt: dict = {}) -> dict:
                         "claim_uuid": "claim::00000000-0000-0000-0000-000000000000",
                         "attrs": {
                             "attr0": "2",
-                            "attr1": "8080189724314",
-                            "attr2": "110838914834142413139418734819234123943712834123947912834701743281470"
+                            "attr1": "Hello",
+                            "attr2": "World"
                         },
                         "issuer_did": "Q4zqM7aXqm7gDQkUVLng9h",
                         "schema_seq_no": 21
@@ -137,8 +132,8 @@ def plain_claims_for(claims: dict, filt: dict = {}) -> dict:
                         "claim_uuid": "claim::00000000-0000-0000-0000-111111111111",
                         "attrs": {
                             "attr0": "1",
-                            "attr1": "8080189724314",
-                            "attr2": "1"
+                            "attr1": "Nice",
+                            "attr2": "Tractor"
                         },
                         "issuer_did": "Q4zqM7aXqm7gDQkUVLng9h",
                         "schema_seq_no": 21
@@ -147,23 +142,18 @@ def plain_claims_for(claims: dict, filt: dict = {}) -> dict:
             }
         }
     :param filt: attributes and values to match from claims structure
-    :return: dict mapping claim uuid to claim attributes for claims matching input filter. This returned structure
-        is suitable for display and human inference, not for re-use in further protocol operations, since it
-        presents any filter attributes as plain, pre-encoding values that the indy-sdk does not recognize.
+    :return: human-legible dict mapping claim uuid to claim attributes for claims matching input filter
     """
 
     uuid2claims = claims['attrs']
-    encfilt = {k: encode(filt[k]) for k in filt}
-    matches = {}
+    filt_str = {k: str(filt[k]) for k in filt}
+    rv = {}
     for claims in uuid2claims.values():
         for claim in claims:
-            if claim['claim_uuid'] not in matches and (encfilt.items() <= claim['attrs'].items()):
-                matches[claim['claim_uuid']] = {
-                    k: filt[k] if k in filt else decode(claim['attrs'][k])
-                    for k in claim['attrs']
-                }
+            if claim['claim_uuid'] not in rv and (filt_str.items() <= claim['attrs'].items()):
+                rv[claim['claim_uuid']] = claim['attrs']
 
-    return matches
+    return rv
 
 
 def prune_claims_json(claim_uuids: set, claims: dict) -> str:

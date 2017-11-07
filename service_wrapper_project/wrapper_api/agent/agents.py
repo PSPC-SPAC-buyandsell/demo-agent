@@ -95,16 +95,6 @@ class BaseAgent:
 
         return self.wallet.verkey
 
-    @property
-    def pubkey(self) -> str:
-        """
-        Accessor for agent public (encryption) key
-
-        :return: agent public (encryption) key
-        """
-
-        return self.wallet.pubkey
-
     async def __aenter__(self) -> 'BaseAgent':
         """
         Context manager entry. Opens wallet and stores agent DID in it.
@@ -349,6 +339,65 @@ class BaseListeningAgent(BaseAgent):
 
         logger.debug('BaseListeningAgent._vet_keys: <<<')
 
+    async def send_endpoint(self) -> str:
+        """
+        Sends agent endpoint attribute to ledger. Returns endpoint json as written
+        (the process of writing the attribute to the ledger does not add any additional content).
+
+        :return: endpoint attibute entry json with host and port
+        """
+
+        logger = logging.getLogger(__name__)
+        logger.debug('BaseListeningAgent.send_endpoint: >>>')
+
+        raw_json = json.dumps({
+            'endpoint': {
+                'host': str(self.host),
+                'port': self.port
+            }
+        })
+        req_json = await ledger.build_attrib_request(self.did, self.did, None, raw_json, None)
+
+        rv = await ledger.sign_and_submit_request(self.pool.handle, self.wallet.handle, self.did, req_json)
+        logger.debug('BaseListeningAgent.send_endpoint: <<< {}'.format(rv))
+        return rv
+
+    async def get_claim_def(self, schema_seq_no: int, issuer_did: str) -> str:
+        """
+        Method to get claim definition from ledger by its parent schema and issuer DID;
+        empty production {} for none, IndyError with error_code = ErrorCode.LedgerInvalidTransaction
+        for bad request.
+
+        :param schema_seq_no: schema sequence number on the ledger
+        :param issuer_did: (claim def) issuer DID
+        :return: claim definition json as retrieved from ledger
+        """
+
+        logger = logging.getLogger(__name__)
+        logger.debug('BaseListeningAgent.get_claim_def: >>> schema_seq_no: {}, issuer_did: {}'.format(
+            schema_seq_no,
+            issuer_did))
+
+        req_json = await ledger.build_get_claim_def_txn(
+            self.did,
+            schema_seq_no,
+            'CL',
+            issuer_did)
+
+        resp_json = await ledger.submit_request(self.pool.handle, req_json)
+
+        resp = json.loads(resp_json)
+        data_json = (json.loads(resp_json))['result']['data']
+        if data_json is None:
+            return json.dumps({})  # not present, give back an empty production
+
+        if resp['result']['data']['revocation'] is not None:
+            resp['result']['data']['revocation'] = None  #TODO: support revocation
+
+        rv = json.dumps(resp['result'])
+        logger.debug('BaseListeningAgent.get_claim_def: <<< {}'.format(rv))
+        return rv
+
     async def _schema_info(self, form_data: dict) -> str:
         """
         Gets schema json for use in indy-sdk structures, reading it from cached property
@@ -398,8 +447,9 @@ class BaseListeningAgent(BaseAgent):
             endpoint = json.loads(await self.get_endpoint(form['data'][proxy_marker_attr]))
             form['data'].pop(proxy_marker_attr)
             r = post(
-                'http://{}/{}/{}'.format(
-                    endpoint['ha'],
+                'http://{}:{}/{}/{}'.format(
+                    endpoint['host'],
+                    endpoint['port'],
                     self.agent_api_path,
                     form['type']),
                 json=form)  # requests module json-encodes
@@ -422,66 +472,6 @@ class BaseListeningAgent(BaseAgent):
         rv.reverse()
 
         logger.debug('BaseListeningAgent._mro_dispatch: <<< {}'.format(rv))
-        return rv
-
-    async def send_endpoint(self) -> str:
-        """
-        Sends agent endpoint attribute to ledger. Returns endpoint json as written
-        (the process of writing the attribute to the ledger does not add any additional content).
-
-        :return: endpoint attibute entry json with public key (which indy-sdk labels 'verkey')
-            and host address (string in format IP address:port)
-        """
-
-        logger = logging.getLogger(__name__)
-        logger.debug('BaseListeningAgent.send_endpoint: >>>')
-
-        raw_json = json.dumps({
-            'endpoint': {
-                'ha': '{}:{}'.format(self.host, self.port),
-                'verkey': self.pubkey
-            }
-        })
-        req_json = await ledger.build_attrib_request(self.did, self.did, None, raw_json, None)
-
-        rv = await ledger.sign_and_submit_request(self.pool.handle, self.wallet.handle, self.did, req_json)
-        logger.debug('BaseListeningAgent.send_endpoint: <<< {}'.format(rv))
-        return rv
-
-    async def get_claim_def(self, schema_seq_no: int, issuer_did: str) -> str:
-        """
-        Method to get claim definition from ledger by its parent schema and issuer DID;
-        empty production {} for none, IndyError with error_code = ErrorCode.LedgerInvalidTransaction
-        for bad request.
-
-        :param schema_seq_no: schema sequence number on the ledger
-        :param issuer_did: (claim def) issuer DID
-        :return: claim definition json as retrieved from ledger
-        """
-
-        logger = logging.getLogger(__name__)
-        logger.debug('BaseListeningAgent.get_claim_def: >>> schema_seq_no: {}, issuer_did: {}'.format(
-            schema_seq_no,
-            issuer_did))
-
-        req_json = await ledger.build_get_claim_def_txn(
-            self.did,
-            schema_seq_no,
-            'CL',
-            issuer_did)
-
-        resp_json = await ledger.submit_request(self.pool.handle, req_json)
-
-        resp = json.loads(resp_json)
-        data_json = (json.loads(resp_json))['result']['data']
-        if data_json is None:
-            return json.dumps({})  # not present, give back an empty production
-
-        if resp['result']['data']['revocation'] is not None:
-            resp['result']['data']['revocation'] = None  #TODO: support revocation
-
-        rv = json.dumps(resp['result'])
-        logger.debug('BaseListeningAgent.get_claim_def: <<< {}'.format(rv))
         return rv
 
     async def process_post(self, form: dict) -> str:
@@ -583,6 +573,20 @@ class BaseListeningAgent(BaseAgent):
                 set(form['data']['claim-filter'].keys()),
                 hint='claim-filter')
             # TODO: predicates
+
+            resp_proxy_json = await self._response_from_proxy(form, 'proxy-did')
+            if resp_proxy_json != None:
+                rv = resp_proxy_json  # it's proxied
+                logger.debug('BaseListeningAgent.process_post: <<< {}'.format(rv))
+                return rv
+
+            # it's local: base listening agent doesn't do this work
+            logger.debug('BaseListeningAgent.process_post: <!< not this form type: {}'.format(form['type']))
+            raise NotImplementedError(
+                '{} does not respond locally to token type {}'.format(self.__class__.__name__, form['type']))
+
+        elif form['type'] == 'proof-request-by-claim-uuid':
+            self.__class__._vet_keys({'claim-uuid'}, set(form['data'].keys()), hint='data')
 
             resp_proxy_json = await self._response_from_proxy(form, 'proxy-did')
             if resp_proxy_json != None:
@@ -1119,9 +1123,9 @@ class Prover(BaseListeningAgent):
         :param proof_req_json: proof request json as verifier creates; has entries for proof request's
             nonce, name, and version; plus claim's requested attributes, requested predicates.
             E.g., {
-                'nonce': 12345,  # for verifier info, not prover matching
+                'nonce': '12345',  # for verifier info, not prover matching
                 'name': 'proof-request',  # for verifier info, not prover matching
-                'version': '1.2',  # for verifier info, not prover matching
+                'version': '1.0',  # for verifier info, not prover matching
                 'requested_attrs': {
                     'attr1_uuid': {
                         'schema_seq_no': 57,
@@ -1175,10 +1179,8 @@ class Prover(BaseListeningAgent):
             logger.exception(x)
             raise x
 
-        # TODO: support empty requested-attributes?
         # TODO: support multiple schemata? Tricky.
 
-        # TODO: support filter by claim-uuid -- very doable
         rv = await anoncreds.prover_create_proof(
             self.wallet.handle,
             proof_req_json,
@@ -1197,16 +1199,16 @@ class Prover(BaseListeningAgent):
         logger.debug('Prover.create_proof: <<< {}'.format(rv))
         return rv
 
-    async def get_claims(self, proof_req_json: str, filter_enc: dict = None) -> (Set[str], str):
+    async def get_claims(self, proof_req_json: str, filt: dict = None) -> (Set[str], str):
         """
         Method for prover to get claims (from wallet) corresponding to proof request
 
         :param proof_req: proof request json as verifier creates; has entries for proof request's
             nonce, name, and version; plus claim's requested attributes, requested predicates
             E.g., {
-                'nonce': 12345,  # for verifier info, not prover matching
+                'nonce': '12345',  # for verifier info, not prover matching
                 'name': 'proof-request',  # for verifier info, not prover matching
-                'version': '1.2',  # for verifier info, not prover matching
+                'version': '1.0',  # for verifier info, not prover matching
                 'requested_attrs': {
                     'attr1_uuid': {
                         'schema_seq_no': 57,
@@ -1229,17 +1231,17 @@ class Prover(BaseListeningAgent):
                     }
                 }
             }
-        :param filter_enc: dict with encoded-to-int values to match in revealed attributes
+        :param filt: dict with stringified values to match in revealed attributes
             (default None for no filter);
             e.g., {
                 'height': '175',
-                'name': '1139481716457488690172217916278103335'
+                'name': 'Alex'
             }
         :return: tuple with (set of claim uuids, json with claims for input proof request)
         """
 
         logger = logging.getLogger(__name__)
-        logger.debug('Prover.get_claims: >>> proof_req_json: {}, filter_enc: {}'.format(proof_req_json, filter_enc))
+        logger.debug('Prover.get_claims: >>> proof_req_json: {}, filt: {}'.format(proof_req_json, filt))
 
         claims_for_proof_json = await anoncreds.prover_get_claims_for_proof_req(self.wallet.handle, proof_req_json)
         claims_for_proof = json.loads(claims_for_proof_json)
@@ -1247,25 +1249,52 @@ class Prover(BaseListeningAgent):
         # retain only claim(s) of interest: find corresponding claim uuid(s)
         for attr_uuid in claims_for_proof['attrs']:
             for candidate in claims_for_proof['attrs'][attr_uuid]:
-                if filter_enc is None:
+                if filt is None:
                     claim_uuids.add(candidate['claim_uuid'])
                 else:
-                    if filter_enc.items() <= candidate['attrs'].items():
+                    if filt.items() <= candidate['attrs'].items():
                         claim_uuids.add(candidate['claim_uuid'])
-        if filter_enc is not None:
+        if filt is not None:
             claims_for_proof = json.loads(prune_claims_json(claim_uuids, claims_for_proof))
-
-        '''
-        for pred_uuid in claims_for_proof['predicates']:  # TODO: support predicates
-            for candidate in claims_for_proof['predicates'][pred_uuid]:
-                if filter_enc is None:
-                    claim_uuids.add(candidate['claim_uuid'])
-                elif candidate['claim_uuid'] not in claim_uuids:
-                    claims_for_proof['predicates'][pred_uuid].pop(candidate)
-        '''
 
         rv = (claim_uuids, json.dumps(claims_for_proof))
         logger.debug('Prover.get_claims: <<< {}'.format(rv))
+        return rv
+
+    async def get_claim_by_claim_uuid(self, schema_json: str, claim_uuid: str) -> str:
+        """
+        Method for prover to get claim (from wallet) by claim-uuid
+
+        :param schema_json: schema json
+        :param claim-uuid: claim uuid
+        :return: json with claim for input claim uuid
+        """
+
+        logger = logging.getLogger(__name__)
+        logger.debug('Prover.get_claim_by_claim_uuid: >>> schema_json: {}, claim_uuid: {}'.format(
+            schema_json,
+            claim_uuid))
+
+        schema = json.loads(schema_json)
+        claim_req_json = json.dumps({
+                'nonce': str(int(time() * 1000)),
+                'name': 'claim-request',  # for verifier info, not prover matching
+                'version': '1.0',  # for verifier info, not prover matching
+                'requested_attrs': {
+                    '{}_uuid'.format(attr): {
+                        'schema_seq_no': schema['seqNo'],
+                        'name': attr
+                    } for attr in schema['data']['keys']
+                },
+                'requested_predicates': {
+                }
+            })
+
+        claims_for_proof_json = await anoncreds.prover_get_claims_for_proof_req(self.wallet.handle, claim_req_json)
+
+        # retain only claim of interest: find corresponding claim uuid
+        rv = prune_claims_json({claim_uuid}, json.loads(claims_for_proof_json))
+        logger.debug('Prover.get_claim_by_claim_uuid: <<< {}'.format(rv))
         return rv
 
     async def reset_wallet(self) -> int:
@@ -1360,8 +1389,8 @@ class Prover(BaseListeningAgent):
             schema = json.loads(await self._schema_info(form['data']))
             find_req = {
                 'nonce': str(int(time() * 1000)),
-                'name': 'find_req_0',  # configure this?
-                'version': '0',  # configure this?
+                'name': 'find_req_0', # informational only
+                'version': '1.0',  # informational only
                 'requested_attrs': {
                     '{}_uuid'.format(attr): {
                         'schema_seq_no': schema['seqNo'],
@@ -1373,11 +1402,12 @@ class Prover(BaseListeningAgent):
                     # TODO: predicates
                 }
             }
-            filter_enc = {
-                k: encode(form['data']['claim-filter']['attr-match'][k])
+            filt = {
+                #k: encode(form['data']['claim-filter']['attr-match'][k])
+                k: str(form['data']['claim-filter']['attr-match'][k])
                     for k in form['data']['claim-filter']['attr-match']
             } if form['data']['claim-filter']['attr-match'] else None
-            (claim_uuids, claims_found_json) = await self.get_claims(json.dumps(find_req), filter_enc)
+            (claim_uuids, claims_found_json) = await self.get_claims(json.dumps(find_req), filt)
             claims_found = json.loads(claims_found_json)
 
             if form['type'] == 'claim-request':
@@ -1412,6 +1442,60 @@ class Prover(BaseListeningAgent):
 
             rv = json.dumps({
                 'proof-req': find_req,
+                'proof': json.loads(proof_json)
+            })
+            logger.debug('Prover.process_post: <<< {}'.format(rv))
+            return rv
+
+        elif form['type'] == 'proof-request-by-claim-uuid':
+            self.__class__._vet_keys({'claim-uuid'}, set(form['data'].keys()), hint='data')
+
+            # base listening agent code handles all proxied requests: it's local, carry on
+            schema_json = await self._schema_info(form['data'])
+            claim_json = await self.get_claim_by_claim_uuid(schema_json, form['data']['claim-uuid'])
+            claim = json.loads(claim_json)
+            if all(not claim['attrs'][attr] for attr in claim['attrs']):
+                x = ValueError('No claim has claim-uuid {}'.format(form['data']['claim-uuid']))
+                logger.exception(x)
+                raise x
+
+            schema = json.loads(schema_json)
+            proof_req = {
+                'nonce': str(int(time() * 1000)),
+                'name': 'proof_req_0', # informational only
+                'version': '1.0',  # informational only
+                'requested_attrs': {
+                    '{}_uuid'.format(attr): {
+                        'schema_seq_no': schema['seqNo'],
+                        'name': attr
+                    } for attr in schema['data']['keys']
+                },
+                'requested_predicates': {
+                    # TODO: predicates
+                }
+            }
+
+            claim_uuid = form['data']['claim-uuid']
+            requested_claims = {
+                'self_attested_attributes': {},
+                'requested_attrs': {
+                    attr: [claim_uuid, True]
+                        for attr in proof_req['requested_attrs'] if attr in claim['attrs']
+                },
+                'requested_predicates': {
+                }
+            }
+
+            proof_json = await self.create_proof(
+                json.dumps(proof_req),
+                schema,
+                json.loads(await self.get_claim_def(
+                    schema['seqNo'],
+                    claim['attrs'][set([*claim['attrs']]).pop()][0]['issuer_did'])),
+                requested_claims)
+
+            rv = json.dumps({
+                'proof-req': proof_req,
                 'proof': json.loads(proof_json)
             })
             logger.debug('Prover.process_post: <<< {}'.format(rv))
@@ -1452,9 +1536,9 @@ class Verifier(BaseListeningAgent):
         :param proof_req_json: proof request json as verifier creates; has entries for proof request's
             nonce, name, and version; plus claim's requested attributes, requested predicates
             E.g., {
-                'nonce': 12345,  # for verifier info, not prover matching
+                'nonce': '12345',  # for verifier info, not prover matching
                 'name': 'proof-request',  # for verifier info, not prover matching
-                'version': '1.2',  # for verifier info, not prover matching
+                'version': '1.0',  # for verifier info, not prover matching
                 'requested_attrs': {
                     'attr1_uuid': {
                         'schema_seq_no': 57,

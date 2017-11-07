@@ -58,7 +58,6 @@ class Wallet:
 
         self._did = None
         self._verkey = None
-        self._pubkey = None
 
         logger.debug('Wallet.__init__: <<<')
 
@@ -142,16 +141,6 @@ class Wallet:
 
         return self._verkey
 
-    @property
-    def pubkey(self) -> str:
-        """
-        Accessor for wallet public (encryption) key
-
-        :return: wallet public (encryption) key
-        """
-
-        return self._pubkey
-
     async def __aenter__(self) -> 'Wallet':
         """
         Context manager entry. Creates and opens wallet as configured, for closure on context manager exit.
@@ -198,9 +187,9 @@ class Wallet:
         self._handle = await wallet.open_wallet(self.name, self.cfg_json, None)
         logger.info('Wallet.open: created and opened wallet {} on handle {}'.format(self.name, self.num))
 
-        (self._did, self._verkey, self._pubkey) = (
+        (self._did, self._verkey) = (
             await signus.create_and_store_my_did(self._handle, json.dumps({'seed': self._seed})))
-        logger.info('Wallet.open: stored {}, {}, {}'.format(self._did, self._verkey, self._pubkey))
+        logger.info('Wallet.open: stored {}, {}'.format(self._did, self._verkey))
 
         logger.debug('Wallet.open: <<<')
         return self

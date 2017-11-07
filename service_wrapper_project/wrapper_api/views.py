@@ -28,7 +28,6 @@ from indy.error import IndyError
 import asyncio
 import json
 import logging
-import traceback
 
 
 logger = logging.getLogger(__name__)
@@ -51,6 +50,8 @@ class ServiceWrapper(APIView):
             rv_json = do(ag.process_post(form))
             return Response(json.loads(rv_json))  # FIXME: this only loads it to dump it: it's already json
         except Exception as e:
+            import traceback
+            print('\n\n==== CHECK POST X {}, {}'.format(req.path, e))
             traceback.print_exc()
             return Response(
                 status=500,
@@ -71,10 +72,10 @@ class ServiceWrapper(APIView):
         try:
             if req.path.startswith('/{}txn'.format(PATH_PREFIX_SLASH)):
                 rv_json = do(ag.process_get_txn(int(seq_no)))
-                return Response(json.loads(rv_json))  # FIXME: this only loads it to dump it: it's already json
+                return Response(json.loads(rv_json))
             elif req.path.startswith('/{}did'.format(PATH_PREFIX_SLASH)):
                 rv_json = do(ag.process_get_did())
-                return Response(json.loads(rv_json))  # FIXME: this only loads it to dump it: it's already json
+                return Response(json.loads(rv_json))
             else:
                 raise ValueError(
                     'Agent service wrapper API does not respond on GET to URL on path {}'.format(req.path))

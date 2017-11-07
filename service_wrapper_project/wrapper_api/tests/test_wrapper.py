@@ -16,7 +16,7 @@ limitations under the License.
 
 from configparser import ConfigParser
 from os.path import abspath, dirname, isfile, join as pjoin
-from ..agent.util import ppjson, plain_claims_for, prune_claims_json
+from ..agent.util import ppjson, claims_for, prune_claims_json
 
 import json
 import pytest
@@ -28,6 +28,7 @@ def form_json(msg_type, args, proxy_did=None):
     # print("... form_json interpolands {}".format([a for a in args]))
     with open(pjoin(dirname(dirname(abspath(__file__))), 'protocol', '{}.json'.format(msg_type)), 'r') as proto:
         raw_json = proto.read()
+    # print("... raw_json: {}".format(raw_json))
     msg_json = raw_json % args
     rv = msg_json
     if proxy_did:
@@ -38,6 +39,8 @@ def form_json(msg_type, args, proxy_did=None):
             'claim-store',
             'claim-request',
             'proof-request',
+            'claim-request-by-claim-uuid',
+            'proof-request-by-claim-uuid',
             'verification-request')
         # print("... form_json json-loading {}".format(msg_json))
         msg = json.loads(msg_json)
@@ -61,7 +64,8 @@ async def test_wrapper(
         seed_trustee1,
         pool_genesis_txn_file,
         path_home):
-    """LD_LIBRARY_PATH=/home/sklump/indy/indy-sdk/libindy/target/debug TEST_POOL_IP=10.0.0.2 AGENT_PROFILE=the-org-book python manage.py runserver --settings=config.settings.local 0.0.0.0:9702 --noreload
+    """
+    RUST_LOG=error TEST_POOL_IP=10.0.0.2 AGENT_PROFILE=the-org-book python manage.py runserver --settings=config.settings.local 0.0.0.0:9702 --noreload
     """
 
     agent_roles = ['trust-anchor', 'sri', 'the-org-book', 'bc-registrar']
@@ -205,10 +209,10 @@ async def test_wrapper(
     assert claims_all
     print("\n\n== 1 == claims by attr, no filter, api-post {}".format(ppjson(claims_all)))
 
-    display_pruned_postfilt = plain_claims_for(claims_all['claims'], {'LegalName': claims[2]['LegalName']})
+    display_pruned_postfilt = claims_for(claims_all['claims'], {'LegalName': claims[2]['LegalName']})
     print("\n\n== 2 == display claims filtered post-hoc matching {}: {}".format(
         claims[2]['LegalName'],
-        ppjson(display_pruned_postfilt)))  # LegalName appears plain: we specified it to plain_claims_for()
+        ppjson(display_pruned_postfilt)))
     display_pruned = prune_claims_json({k for k in display_pruned_postfilt}, claims_all['claims'])
     print("\n\n== 3 == stripped down {}".format(ppjson(display_pruned)))
 
@@ -223,15 +227,15 @@ async def test_wrapper(
     assert claims_prefilt
 
     print("\n== 4 == claims by attr, with filter a priori {}".format(ppjson(claims_prefilt)))
-    display_pruned_prefilt = plain_claims_for(claims_prefilt['claims'])
+    display_pruned_prefilt = claims_for(claims_prefilt['claims'])
     print("\n== 5 == display claims filtered a priori matching {}: {}".format(
         claims[2]['LegalName'],
-        ppjson(display_pruned_prefilt)))  # LegalName appears encoded: we didn't specify it to plain_claims_for()
+        ppjson(display_pruned_prefilt)))
     assert set([*display_pruned_postfilt]) == set([*display_pruned_prefilt])
     assert len(display_pruned_postfilt) == 1
 
-    # 6. Prover responds to request for proof
-    claim_uuid = set([*display_pruned_prefilt]).pop()  # TODO: allow claim-req/proof-req by claim_uuid handle
+    # 6. Prover creates proof and responds to request for proof (by filter)
+    claim_uuid = set([*display_pruned_prefilt]).pop()
     proof_req_json = form_json(
         'proof-request',
         (json.dumps({k: claims[2][k] for k in claims[2] if k in ('sriRegDate', 'busId')}),),
@@ -242,7 +246,7 @@ async def test_wrapper(
     proof_resp = r.json()
     assert proof_resp
 
-    # 7. Verifier verify proof
+    # 7. Verifier verify proof (by filter)
     verification_req_json = form_json(
         'verification-request',
         (json.dumps(proof_resp['proof-req']),json.dumps(proof_resp['proof'])))
@@ -250,21 +254,49 @@ async def test_wrapper(
     r = requests.post(url, json=json.loads(verification_req_json))
     assert r.status_code == 200
     verification_resp = r.json()
+    print("\n== 6 == the proof (by filter) verifies as {}".format(ppjson(verification_resp)))
     assert verification_resp
 
-    print("\n== 6 == the proof verifies as {}".format(ppjson(verification_resp)))
+    # 8. Prover creates proof and responds to request for proof (by claim-uuid)
+    proof_req_json_by_uuid = form_json(
+        'proof-request-by-claim-uuid',
+        json.dumps(claim_uuid),
+        did['the-org-book'])
+    url = url_for(cfg['sri']['Agent'], 'proof-request-by-claim-uuid')
+    r = requests.post(url, json=json.loads(proof_req_json_by_uuid))
+    assert r.status_code == 200
+    proof_resp = r.json()
+    assert proof_resp
+
+    proof_req_json_by_non_uuid = form_json(
+        'proof-request-by-claim-uuid',
+        json.dumps('claim::ffffffff-ffff-ffff-ffff-ffffffffffff'),
+        did['the-org-book'])
+    url = url_for(cfg['sri']['Agent'], 'proof-request-by-claim-uuid')
+    r = requests.post(url, json=json.loads(proof_req_json_by_non_uuid))
+    assert r.status_code == 500
+
+    # 10. Verifier verify proof (by uuid)
+    verification_req_json = form_json(
+        'verification-request',
+        (json.dumps(proof_resp['proof-req']),json.dumps(proof_resp['proof'])))
+    url = url_for(cfg['sri']['Agent'], 'verification-request')
+    r = requests.post(url, json=json.loads(verification_req_json))
+    assert r.status_code == 200
+    verification_resp = r.json()
+    print("\n== 7 == the proof (by claim-uuid={}) verifies as {}".format(claim_uuid, ppjson(verification_resp)))
     assert verification_resp
 
-    # 8. Exercise helper GET TXN call
+    # 11. Exercise helper GET TXN call
     url = url_for(cfg['sri']['Agent'], 'txn/{}'.format(schema['seqNo']))
     r = requests.get(url)
     assert r.status_code == 200
     assert r.json()
-    print("\n== 7 == ledger transaction by seq no {}: {}".format(schema['seqNo'], ppjson(r.json())))
+    print("\n== 8 == ledger transaction by seq no {}: {}".format(schema['seqNo'], ppjson(r.json())))
     
-    # 9. txn# non-existence case
+    # 12. txn# non-existence case
     url = url_for(cfg['sri']['Agent'], 'txn/99999')
     r = requests.get(url)  # ought not exist
     assert r.status_code == 200
-    print("\n== 8 == txn #99999: {}".format(ppjson(r.json())))
+    print("\n== 9 == txn #99999: {}".format(ppjson(r.json())))
     assert not r.json() 

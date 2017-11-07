@@ -18,7 +18,7 @@ from indy import agent, anoncreds, ledger, signus, pool, wallet, IndyError
 from indy.error import ErrorCode
 from ..agent.nodepool import NodePool
 from ..agent.demo_agents import TrustAnchorAgent, SRIAgent, OrgBookAgent, BCRegistrarAgent
-from ..agent.util import encode, ppjson, plain_claims_for, prune_claims_json
+from ..agent.util import encode, ppjson, claims_for, prune_claims_json
 
 import pytest
 import json
@@ -107,7 +107,8 @@ async def test_agents_direct(
     for k in nyms:
         assert 'dest' in nyms[k]
     for k in endpoints:
-        assert 'ha' in endpoints[k]
+        assert 'host' in endpoints[k]
+        assert 'port' in endpoints[k]
 
     # 4. Publish schema to ledger if not yet present; get from ledger
     schema_data = {
@@ -199,7 +200,6 @@ async def test_agents_direct(
         assert json.loads(claim_json)
         await obag.store_claim(claim_json)
     
-
     # 8. Prover finds claims
     by_attr = {
         'nonce': '1234',
@@ -212,26 +212,27 @@ async def test_agents_direct(
             } for attr in claims[0]
         },
         'requested_predicates': {
-        },
+        }
     } 
     (claim_uuids_all, claims_found_json) = await obag.get_claims(json.dumps(by_attr))
     print("\n== 5 == claims by attr, no filter {}; {}".format(claim_uuids_all, ppjson(claims_found_json)))
     claims_found = json.loads(claims_found_json)
-    display_pruned_postfilt = plain_claims_for(claims_found, {'LegalName': claims[2]['LegalName'][0]})
+    display_pruned_postfilt = claims_for(claims_found, {'LegalName': claims[2]['LegalName'][0]})
     print("\n== 6 == display claims filtered post-hoc matching {}: {}".format(
         claims[2]['LegalName'][0],
-        ppjson(display_pruned_postfilt)))  # LegalName appears plain: we specified it to plain_claims_for()
+        ppjson(display_pruned_postfilt)))
     display_pruned = prune_claims_json({k for k in display_pruned_postfilt}, claims_found)
     print("\n== 7 == stripped down {}".format(ppjson(display_pruned)))
 
-    filter_enc = {k: claims[2][k][1] for k in claims[2] if k in ('sriRegDate', 'busId')}
+    filter_enc = {k: claims[2][k][0] for k in claims[2] if k in ('sriRegDate', 'busId')}
     (claim_uuids_filt, claims_found_json) = await obag.get_claims(json.dumps(by_attr), filter_enc)
     print("\n== 8 == claims by attr, filtered a priori {}; {}".format(claim_uuids_filt, ppjson(claims_found_json)))
     assert set([*display_pruned_postfilt]) == claim_uuids_filt
     assert len(display_pruned_postfilt) == 1
 
-    # 9. Prover responds to request for proof
     claim_uuid = claim_uuids_filt.pop()
+
+    # 9. Prover creates proof for claim specified by filter
     claims_found = json.loads(claims_found_json)
     requested_claims = {
         'self_attested_attributes': {},
@@ -245,11 +246,42 @@ async def test_agents_direct(
         }
     }
     proof_json = await obag.create_proof(json.dumps(by_attr), schema, json.loads(claim_def_json), requested_claims)
-    print("\n== 9 == proof {}".format(ppjson(proof_json)))
+    print("\n== 9 == proof (by filter) {}".format(ppjson(proof_json)))
 
-    # 10. Verifier verify proof
+    # 10. Verifier verify proof (by filter)
     rc_json = await sag.verify_proof(json.dumps(by_attr), json.loads(proof_json), schema, json.loads(claim_def_json))
-    print("\n== 10 == the proof verifies as {}".format(ppjson(rc_json)))
+    print("\n== 10 == the proof (by filter) verifies as {}".format(ppjson(rc_json)))
+    assert json.loads(rc_json)
+
+    # 11. Prover finds claim by claim-uuid, no claim by non-claim-uuid
+    claim_found_by_uuid = json.loads(await obag.get_claim_by_claim_uuid(schema_json, claim_uuid))
+    print("\n== 11 == claim by claim-uuid={}: {}".format(claim_uuid, ppjson(claim_found_by_uuid)))
+    assert claim_found_by_uuid
+    assert claim_found_by_uuid['attrs']
+
+    non_claim_by_uuid = json.loads(await obag.get_claim_by_claim_uuid(
+        schema_json,
+        'claim::ffffffff-ffff-ffff-ffff-ffffffffffff'))
+    assert non_claim_by_uuid
+    print("\n== 12 == non-claim: {}".format(ppjson(non_claim_by_uuid)))
+    assert all(not non_claim_by_uuid['attrs'][attr] for attr in non_claim_by_uuid['attrs'])
+
+    # 12. Prover creates proof for claim specified by claim-uuid)
+    requested_claims = {
+        'self_attested_attributes': {},
+        'requested_attrs': {
+            attr: [claim_uuid, True]
+                for attr in claim_found_by_uuid['attrs']
+        },
+        'requested_predicates': {
+        }
+    }
+    proof_json = await obag.create_proof(json.dumps(by_attr), schema, json.loads(claim_def_json), requested_claims)
+    print("\n== 13 == proof by claim-uuid={} {}".format(claim_uuid, ppjson(proof_json)))
+
+    # 10. Verifier verify proof (by filter)
+    rc_json = await sag.verify_proof(json.dumps(by_attr), json.loads(proof_json), schema, json.loads(claim_def_json))
+    print("\n== 14 == the proof by claim-uuid={} verifies as {}".format(claim_uuid, ppjson(rc_json)))
     assert json.loads(rc_json)
 
     await bcrag.close()
@@ -490,7 +522,6 @@ async def test_agents_process_forms_local(
         claim_req_json = await obag.process_post(claim_hello_form)
         claim_req = json.loads(claim_req_json)
         assert claim_req
-        print('\n\n=== XX === claim-req from bc-rag->obag hello: {}'.format(ppjson(claim_req)))
 
         # 6. Issuer issue claims and store at prover: get claim req, create claim, store claim
         claims = [
@@ -541,7 +572,7 @@ async def test_agents_process_forms_local(
                 }
             })
 
-        # 7. Prover finds claims
+        # 7. Prover finds claims (by filter)
         by_attr = {
             'nonce': '1234',
             'name': 'proof_req_0',
@@ -567,10 +598,10 @@ async def test_agents_process_forms_local(
             }
         }))
         print("\n== 3 == claims by attr, no filter, process-post {}".format(ppjson(claims_all)))
-        display_pruned_postfilt = plain_claims_for(claims_all['claims'], {'LegalName': claims[2]['LegalName']})
+        display_pruned_postfilt = claims_for(claims_all['claims'], {'LegalName': claims[2]['LegalName']})
         print("\n== 4 == display claims filtered post-hoc matching {}: {}".format(
             claims[2]['LegalName'],
-            ppjson(display_pruned_postfilt)))  # LegalName appears plain: we specified it to plain_claims_for()
+            ppjson(display_pruned_postfilt)))
         display_pruned = prune_claims_json({k for k in display_pruned_postfilt}, claims_all['claims'])
         print("\n== 5 == stripped down {}".format(ppjson(display_pruned)))
 
@@ -588,15 +619,14 @@ async def test_agents_process_forms_local(
         })
         claims_prefilt = json.loads(claims_prefilt_json)
         print("\n== 6 == claims by attr, with filter a priori, process-post {}".format(ppjson(claims_prefilt)))
-        display_pruned_prefilt = plain_claims_for(claims_prefilt['claims'])
+        display_pruned_prefilt = claims_for(claims_prefilt['claims'])
         print("\n== 7 == display claims filtered a priori matching {}: {}".format(
             claims[2]['LegalName'],
-            ppjson(display_pruned_prefilt)))  # LegalName appears encoded: we didn't specify it to plain_claims_for()
+            ppjson(display_pruned_prefilt)))
         assert set([*display_pruned_postfilt]) == set([*display_pruned_prefilt])
         assert len(display_pruned_postfilt) == 1
 
-        # 8. Prover responds to request for proof
-        claim_uuid = set([*display_pruned_prefilt]).pop()  # TODO: allow claim-req/proof-req by claim_uuid handle
+        # 8. Prover creates proof (by filter)
         proof_resp = json.loads(await obag.process_post({
             'type': 'proof-request',
             'data': {
@@ -609,23 +639,53 @@ async def test_agents_process_forms_local(
                 }
             }
         }))
-        print("\n== 8 == proof response {}".format(ppjson(proof_resp)))
+        print("\n== 8 == proof response (by filter) {}".format(ppjson(proof_resp)))
 
-        # 9. Verifier verify proof
+        # 9. Verifier verify proof (by filter)
         rc_json = await sag.process_post({
             'type': 'verification-request',
             'data': proof_resp
         })
-        print("\n== 9 == the proof verifies as {}".format(ppjson(rc_json)))
+        print("\n== 9 == the proof (by filter) verifies as {}".format(ppjson(rc_json)))
         assert json.loads(rc_json)
 
-        # 10. Exercise helper GET calls
+        # 10. Prover creates proof (by claim-uuid)
+        claim_uuid = set([*display_pruned_prefilt]).pop()
+        proof_resp = json.loads(await obag.process_post({
+            'type': 'proof-request-by-claim-uuid',
+            'data': {
+                'claim-uuid': claim_uuid
+            }
+        }))
+        print("\n== 10 == proof response by claim-uuid={}: {}".format(claim_uuid, ppjson(proof_resp)))
+
+        # 11. Prover creates no proof (by non-claim-uuid)
+        non_claim_uuid = 'claim::ffffffff-ffff-ffff-ffff-ffffffffffff'
+        try:
+            proof_resp = json.loads(await obag.process_post({
+                'type': 'proof-request-by-claim-uuid',
+                'data': {
+                    'claim-uuid': non_claim_uuid
+                }
+            }))
+        except ValueError:
+            pass
+
+        # 12. Verifier verify proof (by claim-uuid)
+        rc_json = await sag.process_post({
+            'type': 'verification-request',
+            'data': proof_resp
+        })
+        print("\n== 12 == the proof by claim_uuid={} verifies as {}".format(claim_uuid, ppjson(rc_json)))
+        assert json.loads(rc_json)
+
+        # 13. Exercise helper GET calls
         txn_json = await sag.process_get_txn(schema['seqNo'])
-        print("=== 10 === schema by txn #{}: {}".format(schema['seqNo'], ppjson(txn_json)))
+        print("=== 13 === schema by txn #{}: {}".format(schema['seqNo'], ppjson(txn_json)))
         assert json.loads(txn_json)
         txn_json = await sag.process_get_txn(99999)  # ought not exist
         assert not json.loads(txn_json)
 
         did_json = await bcrag.process_get_did()
-        print("=== 11 === bcrag did: {}".format(ppjson(did_json)))
+        print("=== 14 === bcrag did: {}".format(ppjson(did_json)))
         assert json.loads(did_json)
