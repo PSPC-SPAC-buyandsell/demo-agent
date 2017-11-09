@@ -27,6 +27,7 @@ def ppjson(dumpit):
 
     return json.dumps(json.loads(dumpit) if isinstance(dumpit, str) else dumpit, indent=4)
 
+
 def encode(value):
     """
     Encoder for claim values, returns encoded value.
@@ -170,3 +171,17 @@ def prune_claims_json(claim_uuids: set, claims: dict) -> str:
         claims['attrs'][attr_uuid] = [claim for claim in claims_by_uuid if claim['claim_uuid'] in claim_uuids]
 
     return json.dumps(claims)
+
+
+def revealed_attrs(proof: dict) -> dict:
+    """
+    Fetches revealed attributes from input proof, returns dict mapping attribute names to [decoded, encoded] values,
+    for processing as further claims downstream
+
+    :param: indy-sdk proof as dict (proving exactly one claim)
+    :return: dict mapping revealed attribute names to [decoded, encoded] values
+    """
+
+    revealed = proof['proofs'][set(proof['proofs']).pop()]['proof']['primary_proof']['eq_proof']['revealed_attrs']
+    rv = {attr: [decode(revealed[attr]), revealed[attr]] for attr in revealed}
+    return rv

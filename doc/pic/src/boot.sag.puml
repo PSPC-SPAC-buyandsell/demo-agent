@@ -18,7 +18,7 @@ limitations under the License.
 skinparam ParticipantPadding 20
 skinparam BaloxPadding 20
 
-title Holder-Prover Agent Boot Sequence
+title SRI Agent Boot Sequence
 
 
 box "Indy" #LightBlue
@@ -26,37 +26,42 @@ box "Indy" #LightBlue
 endbox
 actor "Trust Anchor\n(Origin)\nAgent" as tag
 actor "Holder-Prover\n(The Org Book)\nAgent" as obag
+actor "Verifier/Issuer/Holder-Prover\n(SRI)\nAgent" as sag
 
 === BOOTSTRAP ==
-note over ledger, obag
+note over ledger, sag
 Trust anchor agent service wrapper API is up
+Prover/Holder agent service wrapper API is up
 endnote
 
-obag -> tag: get DID
-tag --> obag: trust anchor DID
+sag -> tag: get DID
+tag --> sag: trust anchor DID
 
-obag -> ledger: Look up own nym
+sag -> ledger: Look up own nym
 alt Nym present
-    ledger --> obag: agent nym
+    ledger --> sag: nym
 else Nym not present
-    obag -[#blue]> tag: <agent-nym-send>
-    tag -[#blue]> ledger: send agent nym
-    ledger --[#blue]> tag: agent nym
-    tag --[#blue]> obag: agent nym
+    sag -[#blue]> tag: POST <agent-nym-send>
+    tag -[#blue]> ledger: send Issuer nym
+    ledger --[#blue]> tag: Issuer nym
+    tag --[#blue]> sag: Issuer nym
 end
 
-obag -> ledger: Look up endpoint attribution
+sag -> ledger: Look up endpoint attribution
 alt Endpoint attribution present
-    ledger --> obag: agent endpoint
+    ledger --> sag: agent endpoint
 else Endpoint attribution not present
-    obag -[#blue]> ledger: send agent endpoint
-    ledger --[#blue]> obag: agent endpoint
+    sag -[#blue]> ledger: send agent endpoint
+    ledger --[#blue]> sag: agent endpoint
 end
 
-obag -> ledger: Look up schema
-ledger --> obag: schema
-obag -> obag: cache schema
+sag -> ledger: look up schema
+ledger --> sag: schema
+sag -> sag: cache schema
 
-obag -> obag: create, store master secret
+sag -> ledger: send claim definition
+ledger --> sag: returns
+
+sag -> sag: create, store master secret
 
 @enduml

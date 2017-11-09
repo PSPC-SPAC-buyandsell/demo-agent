@@ -18,8 +18,9 @@ from indy import agent, anoncreds, ledger, signus, pool, wallet, IndyError
 from indy.error import ErrorCode
 from ..agent.nodepool import NodePool
 from ..agent.demo_agents import TrustAnchorAgent, SRIAgent, OrgBookAgent, BCRegistrarAgent
-from ..agent.util import encode, ppjson, claims_for, prune_claims_json
+from ..agent.util import encode, revealed_attrs, ppjson, claims_for, prune_claims_json
 
+import datetime
 import pytest
 import json
 
@@ -151,7 +152,7 @@ async def test_agents_direct(
     assert json.loads(claim_def_json)['ref'] == schema['seqNo']
     print('\n\n\n\n=== 3 === claim def {}'.format(ppjson(json.loads(claim_def_json))))
 
-    # 6. Setup master secrets, claim reqs at Prover agents
+    # 6. Setup master secrets, claim reqs at HolderProver agents
     await obag.create_master_secret('MasterSecret')
 
     wallet_num = obag.wallet.num
@@ -162,7 +163,7 @@ async def test_agents_direct(
 
     print('\n\n\n=== 4 === claim req {}'.format(claim_req_json))
 
-    # 7. Issuer issue claims and store at prover: get claim req, create claim, store claim
+    # 7. Issuer issue claims and store at HolderProver: get claim req, create claim, store claim
     claims = [
         {
             'id': claim_value_pair('1'),
@@ -199,8 +200,8 @@ async def test_agents_direct(
         (_, claim_json) = await bcrag.create_claim(claim_req_json, c)
         assert json.loads(claim_json)
         await obag.store_claim(claim_json)
-    
-    # 8. Prover finds claims
+
+    # 8. HolderProver finds claims
     by_attr = {
         'nonce': '1234',
         'name': 'proof_req_0',
@@ -232,7 +233,7 @@ async def test_agents_direct(
 
     claim_uuid = claim_uuids_filt.pop()
 
-    # 9. Prover creates proof for claim specified by filter
+    # 9. HolderProver creates proof for claim specified by filter
     claims_found = json.loads(claims_found_json)
     requested_claims = {
         'self_attested_attributes': {},
@@ -253,7 +254,7 @@ async def test_agents_direct(
     print("\n== 10 == the proof (by filter) verifies as {}".format(ppjson(rc_json)))
     assert json.loads(rc_json)
 
-    # 11. Prover finds claim by claim-uuid, no claim by non-claim-uuid
+    # 11. HolderProver finds claim by claim-uuid, no claim by non-claim-uuid
     claim_found_by_uuid = json.loads(await obag.get_claim_by_claim_uuid(schema_json, claim_uuid))
     print("\n== 11 == claim by claim-uuid={}: {}".format(claim_uuid, ppjson(claim_found_by_uuid)))
     assert claim_found_by_uuid
@@ -266,7 +267,7 @@ async def test_agents_direct(
     print("\n== 12 == non-claim: {}".format(ppjson(non_claim_by_uuid)))
     assert all(not non_claim_by_uuid['attrs'][attr] for attr in non_claim_by_uuid['attrs'])
 
-    # 12. Prover creates proof for claim specified by claim-uuid)
+    # 12. HolderProver creates proof for claim specified by claim-uuid
     requested_claims = {
         'self_attested_attributes': {},
         'requested_attrs': {
@@ -277,11 +278,65 @@ async def test_agents_direct(
         }
     }
     proof_json = await obag.create_proof(json.dumps(by_attr), schema, json.loads(claim_def_json), requested_claims)
+    proof = json.loads(proof_json)
     print("\n== 13 == proof by claim-uuid={} {}".format(claim_uuid, ppjson(proof_json)))
 
-    # 10. Verifier verify proof (by filter)
-    rc_json = await sag.verify_proof(json.dumps(by_attr), json.loads(proof_json), schema, json.loads(claim_def_json))
+    # 13. Verifier verify proof
+    rc_json = await sag.verify_proof(json.dumps(by_attr), proof, schema, json.loads(claim_def_json))
     print("\n== 14 == the proof by claim-uuid={} verifies as {}".format(claim_uuid, ppjson(rc_json)))
+    assert json.loads(rc_json)
+
+    # 14. Setup SRI as HolderProver to complete process of SRI registration
+    await sag.create_master_secret('SecretMaster')
+    wallet_num = sag.wallet.num
+    assert (await sag.reset_wallet()) > wallet_num  # makes sure later ops are OK on reset wallet
+
+    sri_claim_def_json = await sag.get_claim_def(schema['seqNo'], sag.did)  # ought to exist
+    assert json.loads(sri_claim_def_json)['ref'] == schema['seqNo']
+    await sag.store_claim_offer(sag.did, schema['seqNo'])
+    sri_claim_req_json = await sag.store_claim_req(sag.did, sri_claim_def_json)
+    print('\n\n\n=== 15 === SRI claim req {}'.format(sri_claim_req_json))
+
+    # 15. Create and store SRI registration completion claim from verified proof
+    sri_claim = revealed_attrs(proof)
+    yyyy_mm_dd = datetime.date.today().strftime('%Y-%m-%d')
+    sri_claim['sriRegDate'] = claim_value_pair(yyyy_mm_dd)
+    print("\n== 16 == sri_claim: {}".format(ppjson(sri_claim)))
+    (_, sri_claim_json) = await sag.create_claim(sri_claim_req_json, c)
+    assert json.loads(sri_claim_json)
+    await sag.store_claim(sri_claim_json)
+
+    # 16. SRI (as HolderProver) finds claim
+    (sri_claim_uuids_all, sri_claims_found_json) = await sag.get_claims(json.dumps(by_attr))
+    print("\n== 17 == SRI claims by attr, no filter {}; {}".format(sri_claim_uuids_all, ppjson(sri_claims_found_json)))
+    assert len(sri_claim_uuids_all) == 1
+    sri_claim_uuid = sri_claim_uuids_all.pop()
+    sri_claims_found = json.loads(sri_claims_found_json)
+
+    # 17. SRI (as HolderProver) creates proof
+    sri_requested_claims = {
+        'self_attested_attributes': {},
+        'requested_attrs': {
+            attr: [sri_claim_uuid, True]
+                for attr in sri_claims_found['attrs']
+        },
+        'requested_predicates': {
+        }
+    }
+    sri_proof_json = await sag.create_proof(
+        json.dumps(by_attr),
+        schema,
+        json.loads(sri_claim_def_json),
+        sri_requested_claims)
+    print("\n== 18 == SRI proof on claim-uuid={} {}".format(sri_claim_uuid, ppjson(sri_proof_json)))
+
+    # 18. SRI (as Verifier) verify proof
+    rc_json = await sag.verify_proof(
+        json.dumps(by_attr),
+        json.loads(sri_proof_json),
+        schema,
+        json.loads(sri_claim_def_json))
+    print("\n== 19 == the SRI proof by claim-uuid={} verifies as {}".format(sri_claim_uuid, ppjson(rc_json)))
     assert json.loads(rc_json)
 
     await bcrag.close()
@@ -486,7 +541,7 @@ async def test_agents_process_forms_local(
         claim_def_json = await obag.get_claim_def(schema['seqNo'], bcrag.did)  # ought to exist now (short-circuit)
         assert json.loads(claim_def_json)['ref'] == schema['seqNo']
 
-        # 5. Setup master secrets, claim reqs at Prover agents
+        # 5. Setup master secrets, claim reqs at HolderProver agents
         master_secret_set_form = {
             'type': 'master-secret-set',
             'data': {
@@ -506,24 +561,26 @@ async def test_agents_process_forms_local(
             pass
 
         await obag.process_post(master_secret_set_form)
+
         try:  # schema unspecified, ought to fail
             claim_req_json = await obag.process_post(claim_hello_form)
         except ValueError:
             pass
 
-        claims_reset_resp = json.loads(await obag.process_post({  # make sure later ops are OK on reset wallet
+        claims_reset_form = {
             'type': 'claims-reset',
             'data': {
             }
-        }))
-        assert not claims_reset_resp
+        }
+        claims_reset_resp = json.loads(await obag.process_post(claims_reset_form))
+        assert not claims_reset_resp  # make sure later ops are OK on reset wallet -- response is {} if OK
 
-        await obag.process_post(schema_lookup_form)  # bootstrap prover with current schema
+        await obag.process_post(schema_lookup_form)  # bootstrap HolderProver with current schema
         claim_req_json = await obag.process_post(claim_hello_form)
         claim_req = json.loads(claim_req_json)
         assert claim_req
 
-        # 6. Issuer issue claims and store at prover: get claim req, create claim, store claim
+        # 6. Issuer issue claims and store at HolderProver: get claim req, create claim, store claim
         claims = [
             {
                 'id': 1,
@@ -564,15 +621,14 @@ async def test_agents_process_forms_local(
                     'claim-attrs': c
                 }
             })
-            claim = json.loads(claim_json)
             await obag.process_post({
                 'type': 'claim-store',
                 'data': {
-                    'claim': claim
+                    'claim': json.loads(claim_json)
                 }
             })
 
-        # 7. Prover finds claims (by filter)
+        # 7. HolderProver finds claims
         by_attr = {
             'nonce': '1234',
             'name': 'proof_req_0',
@@ -626,7 +682,7 @@ async def test_agents_process_forms_local(
         assert set([*display_pruned_postfilt]) == set([*display_pruned_prefilt])
         assert len(display_pruned_postfilt) == 1
 
-        # 8. Prover creates proof (by filter)
+        # 8. HolderProver creates proof (by filter)
         proof_resp = json.loads(await obag.process_post({
             'type': 'proof-request',
             'data': {
@@ -649,7 +705,7 @@ async def test_agents_process_forms_local(
         print("\n== 9 == the proof (by filter) verifies as {}".format(ppjson(rc_json)))
         assert json.loads(rc_json)
 
-        # 10. Prover creates proof (by claim-uuid)
+        # 10. HolderProver creates proof (by claim-uuid)
         claim_uuid = set([*display_pruned_prefilt]).pop()
         proof_resp = json.loads(await obag.process_post({
             'type': 'proof-request-by-claim-uuid',
@@ -659,7 +715,7 @@ async def test_agents_process_forms_local(
         }))
         print("\n== 10 == proof response by claim-uuid={}: {}".format(claim_uuid, ppjson(proof_resp)))
 
-        # 11. Prover creates no proof (by non-claim-uuid)
+        # 11. HolderProver creates no proof (by non-claim-uuid)
         non_claim_uuid = 'claim::ffffffff-ffff-ffff-ffff-ffffffffffff'
         try:
             proof_resp = json.loads(await obag.process_post({
@@ -679,13 +735,83 @@ async def test_agents_process_forms_local(
         print("\n== 12 == the proof by claim_uuid={} verifies as {}".format(claim_uuid, ppjson(rc_json)))
         assert json.loads(rc_json)
 
-        # 13. Exercise helper GET calls
+        # 13. Finish bootstrapping SRI as HolderProver to complete SRI registration
+        master_secret_set_form['data']['label'] = 'shhhh'
+        await sag.process_post(master_secret_set_form)
+        sri_claims_reset_resp = json.loads(await sag.process_post(claims_reset_form))
+        assert not sri_claims_reset_resp  # make sure later ops are OK on reset wallet -- response is {} if OK
+
+        sri_claim_def_json = await sag.get_claim_def(schema['seqNo'], sag.did)
+        assert json.loads(sri_claim_def_json)['ref'] == schema['seqNo']
+        await sag.process_post(schema_lookup_form)  # bootstrap SRIAgent with current schema
+
+        # 14. Create and store SRI registration completion claim from verified proof
+        claim_hello_form['data']['issuer-did'] = sag.did
+        sri_claim_req_json = await sag.process_post(claim_hello_form)
+        sri_claim_req = json.loads(sri_claim_req_json)
+        assert sri_claim_req
+
+        sri_claim = revealed_attrs(proof_resp['proof'])
+        yyyy_mm_dd = datetime.date.today().strftime('%Y-%m-%d')
+        sri_claim['sriRegDate'] = yyyy_mm_dd
+
+        print("\n== 13 == sri_claim: {}".format(ppjson(sri_claim)))
+
+        sri_claim_json = await sag.process_post({
+            'type': 'claim-create',
+            'data': {
+                'claim-req': sri_claim_req,
+                'claim-attrs': sri_claim
+            }
+        })
+        await sag.process_post({
+            'type': 'claim-store',
+            'data': {
+                'claim': json.loads(sri_claim_json)
+            }
+        })
+        assert json.loads(sri_claim_json)
+
+        # 15. SRI (as HolderProver) finds claim
+        sri_claims_all = json.loads(await sag.process_post({
+            'type': 'claim-request',
+            'data': {
+                'claim-filter': {
+                    'attr-match': {
+                    },
+                    'predicate-match': [
+                    ]
+                }
+            }
+        }))
+        print("\n== 14 == SRI claim {}".format(ppjson(sri_claims_all)))
+
+        # 16. SRI(as HolderProver) creates proof
+        sri_display = claims_for(sri_claims_all['claims'])
+        sri_claim_uuid = set([*sri_display]).pop()
+        sri_proof_resp = json.loads(await sag.process_post({
+            'type': 'proof-request-by-claim-uuid',
+            'data': {
+                'claim-uuid': sri_claim_uuid
+            }
+        }))
+        print("\n== 15 == SRI proof response by claim-uuid={}: {}".format(sri_claim_uuid, ppjson(sri_proof_resp)))
+
+        # 17. SRI(as Verifier) verifies proof
+        rc_json = await sag.process_post({
+            'type': 'verification-request',
+            'data': sri_proof_resp
+        })
+        print("\n== 16 == the SRI proof by claim_uuid={} verifies as {}".format(sri_claim_uuid, ppjson(rc_json)))
+        assert json.loads(rc_json)
+
+        # 18. Exercise helper GET calls
         txn_json = await sag.process_get_txn(schema['seqNo'])
-        print("=== 13 === schema by txn #{}: {}".format(schema['seqNo'], ppjson(txn_json)))
+        print("=== 17 === schema by txn #{}: {}".format(schema['seqNo'], ppjson(txn_json)))
         assert json.loads(txn_json)
         txn_json = await sag.process_get_txn(99999)  # ought not exist
         assert not json.loads(txn_json)
 
         did_json = await bcrag.process_get_did()
-        print("=== 14 === bcrag did: {}".format(ppjson(did_json)))
+        print("=== 18 === bcrag did: {}".format(ppjson(did_json)))
         assert json.loads(did_json)

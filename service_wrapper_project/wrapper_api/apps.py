@@ -35,6 +35,7 @@ LOG_FORMAT='%(levelname)-8s || %(name)-12s || %(message)s'
 logging.basicConfig(
     level=logging.DEBUG,
     format=LOG_FORMAT)
+logging.getLogger('indy').setLevel(logging.ERROR)
 logging.getLogger('requests').setLevel(logging.ERROR)
 logging.getLogger('urllib3').setLevel(logging.CRITICAL)
 
@@ -57,14 +58,7 @@ class WrapperApiConfig(AppConfig):
         cfg = init_config()
         base_api_url_path = PATH_PREFIX_SLASH.strip('/')
 
-        role = (cfg['Agent']['role'] or '').lower().replace(' ', '')  # as a pool name, will be a dir: spaces are evil
-        """
-        handler = logging.FileHandler(pjoin(dirname(abspath(__file__)), 'log', '{}.log'.format(role)))
-        formatter = logging.Formatter(LOG_FORMAT)
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        logger.setLevel(logging.DEBUG)
-        """
+        role = (cfg['Agent']['role'] or '').lower().replace(' ', '')  # will be a dir as a pool name: spaces are evil
 
         p = None  # the node pool
         p = NodePool('pool.{}'.format(role), cfg['Pool']['genesis.txn.path'])
@@ -140,30 +134,28 @@ class WrapperApiConfig(AppConfig):
                     base_api_url_path)
 
             do(ag.open())
-            logging.debug("check {} 2: ag class {}".format(role, ag.__class__.__name__))
+            logging.debug("role {}; ag class {}".format(role, ag.__class__.__name__))
 
             trust_anchor_host = cfg['Trust Anchor']['host']
             trust_anchor_port = cfg['Trust Anchor']['port']
 
             # trust anchor DID is necessary
-            logging.debug("check {} 3".format(role))
             r = requests.get('http://{}:{}/{}/did'.format(trust_anchor_host, trust_anchor_port, base_api_url_path))
             r.raise_for_status()
             tag_did = r.json()
             assert tag_did
 
-            logging.debug("== check {} 4, tag_did {}".format(role, tag_did))
+            logging.debug("{}; tag_did {}".format(role, tag_did))
             # get nym: if not registered; get trust-anchor host & port, post an agent-nym-send form
             if not json.loads(do(ag.get_nym(ag.did))):
                 with open(pjoin(dirname(abspath(__file__)), 'protocol', 'agent-nym-send.json'), 'r') as proto:
                     j = proto.read()
-                logging.debug("== check {} 4.0 sending {}".format(role, j % (ag.did, ag.verkey)))
+                logging.debug("{}; sending {}".format(role, j % (ag.did, ag.verkey)))
                 r = requests.post(
                     'http://{}:{}/{}/agent-nym-send'.format(trust_anchor_host, trust_anchor_port, base_api_url_path),
                     json=json.loads(j % (ag.did, ag.verkey)))
                 r.raise_for_status()
 
-            logging.debug("\n== check {} 5".format(role))
             # get endpoint: if not present, send it
             if not json.loads(do(ag.get_endpoint(ag.did))):
                 do(ag.send_endpoint())
@@ -177,19 +169,17 @@ class WrapperApiConfig(AppConfig):
                 cfg['Schema']['version']))))
             assert json.loads(schema_json)
 
-            logging.debug("\n== check {} 6".format(role))
-            if role == 'the-org-book':
-                # set master secret
-                from os import getpid
-                do(ag.create_master_secret(cfg['Agent']['master.secret'] + '.' + str(getpid())))  # TODO: awful!
-                logging.error("FIX ^ THIS ^ WORKAROUND ^ FOR ^ DUPLICATE ^ MASTER ^ SECRET")
-                logging.debug("\n== check {} 7".format(role))
-
-            elif role in ('bc-registrar', 'sri'):
+            if role in ('bc-registrar', 'sri'):
                 # issuer send claim def
                 do(ag.send_claim_def(schema_json))
                 logging.debug("\n== check {} 8".format(role))
-            logging.debug("\n== check {} 9".format(role))
+
+            if role in ('the-org-book', 'sri'):
+                # set master secret
+                from os import getpid
+                # append pid to avoid re-using a master secret on restart of HolderProver agent; indy-sdk library 
+                # is shared, so it remembers and forbids it unless we shut down all processes
+                do(ag.create_master_secret(cfg['Agent']['master.secret'] + '.' + str(getpid())))
 
         else:
             raise ValueError('Unsupported agent role [{}]'.format(role))

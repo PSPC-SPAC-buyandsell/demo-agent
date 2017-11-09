@@ -24,7 +24,7 @@ box "Indy" #LightBlue
     participant "Ledger" as ledger
 endbox
 
-actor "Prover/Holder\n(The Org Book)\nAgent" as obag
+actor "Holder-Prover\n(The Org Book)\nAgent" as obag
 actor "Verifier\n(SRI)\nAgent" as sag
 actor "Actuator" as ator
 
@@ -35,12 +35,12 @@ obag --> ator: DID
 note over ledger, ator
 All agent service wrapper APIs are up
 Schema, claim definitions are on ledger
-Claim load sequence has stored claims at Prover/Holder
+Claim load sequence has stored claims at Holder-Prover
 endnote
 
-ator -> sag: POST <claims-reset> on filter, proxy by Prover/Holder DID
-sag -> ledger: get endpoint for Prover/Holder DID
-ledger --> sag: Prover/Holder endpoint
+ator -> sag: POST <claims-reset> on filter, proxy by Holder-Prover DID
+sag -> ledger: get endpoint for Holder-Prover DID
+ledger --> sag: Holder-Prover endpoint
 sag --> obag: POST <claims-reset>
 obag -> obag: reset wallet, master secret
 obag --> sag: returns

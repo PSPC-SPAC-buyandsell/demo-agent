@@ -185,7 +185,7 @@ class Wallet:
                     raise
 
         self._handle = await wallet.open_wallet(self.name, self.cfg_json, None)
-        logger.info('Wallet.open: created and opened wallet {} on handle {}'.format(self.name, self.num))
+        logger.info('Wallet.open: created and opened wallet {} on handle {}'.format(self.name, self.handle))
 
         (self._did, self._verkey) = (
             await signus.create_and_store_my_did(self._handle, json.dumps({'seed': self._seed})))

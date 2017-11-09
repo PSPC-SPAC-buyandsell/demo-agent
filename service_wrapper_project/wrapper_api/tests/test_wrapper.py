@@ -16,8 +16,9 @@ limitations under the License.
 
 from configparser import ConfigParser
 from os.path import abspath, dirname, isfile, join as pjoin
-from ..agent.util import ppjson, claims_for, prune_claims_json
+from ..agent.util import ppjson, claims_for, prune_claims_json, revealed_attrs
 
+import datetime
 import json
 import pytest
 import requests
@@ -35,6 +36,7 @@ def form_json(msg_type, args, proxy_did=None):
         assert msg_type in (
             'agent-nym-send',
             'agent-endpoint-send',
+            'claim-def-send',
             'claim-hello',
             'claim-store',
             'claim-request',
@@ -88,8 +90,8 @@ async def test_wrapper(
 
     print("\n\n=== Test config: {}".format(ppjson(cfg)))
 
-    did = {}
     # 1. ensure all demo agents are up
+    did = {}
     for agent_role in agent_roles:
         url = url_for(cfg[agent_role]['Agent'], 'did')
         r = requests.get(url)
@@ -110,25 +112,21 @@ async def test_wrapper(
     assert r.status_code == 200
     schema = r.json()
 
-    """
-    # 3X. claim-hello no proxy
-    claim_hello_json = form_json(
-        'claim-hello',
-        (did['bc-registrar'],))
-    url = url_for(cfg['the-org-book']['Agent'], 'claim-hello')
-    r = requests.post(url, json=json.loads(claim_hello_json))
-    assert r.status_code == 200
-    claim_req = r.json()
-    assert claim_req
-    print('\n\n=== X.0 === claim-req from bc-rag->obag hello: {}'.format(ppjson(claim_req)))
-    """
-
-    # 3. Prover responds to claims-reset directive, to restore state to base line
+    # 3. HolderProver responds to claims-reset directive, to restore state to base line
     claims_reset_json = form_json(
         'claims-reset',
         ())
     url = url_for(cfg['the-org-book']['Agent'], 'claims-reset')
     r = requests.post(url, json=json.loads(claims_reset_json))
+    assert r.status_code == 200
+    reset_resp = r.json()
+    assert not reset_resp
+
+    sri_claims_reset_json = form_json(
+        'claims-reset',
+        ())
+    url = url_for(cfg['sri']['Agent'], 'claims-reset')
+    r = requests.post(url, json=json.loads(sri_claims_reset_json))
     assert r.status_code == 200
     reset_resp = r.json()
     assert not reset_resp
@@ -143,7 +141,6 @@ async def test_wrapper(
     assert r.status_code == 200
     claim_req = r.json()
     assert claim_req
-    # print('\n\n=== XX === claim-req through proxy bc-rag->obag hello: {}'.format(ppjson(claim_req)))
 
     claims = [
         {
@@ -180,7 +177,10 @@ async def test_wrapper(
     for c in claims:
         claim_create_json = form_json(
             'claim-create',
-            (json.dumps(claim_req), json.dumps(c)))
+            (
+                json.dumps(claim_req),
+                json.dumps(c)
+            ))
         url = url_for(cfg['bc-registrar']['Agent'], 'claim-create')
         r = requests.post(url, json=json.loads(claim_create_json))
         assert r.status_code == 200
@@ -197,7 +197,7 @@ async def test_wrapper(
         assert r.status_code == 200
         # response is empty
 
-    # 5. Prover finds claims
+    # 5. HolderProver finds claims
     claim_req_all_json = form_json(
         'claim-request',
         (json.dumps({}),),
@@ -234,7 +234,7 @@ async def test_wrapper(
     assert set([*display_pruned_postfilt]) == set([*display_pruned_prefilt])
     assert len(display_pruned_postfilt) == 1
 
-    # 6. Prover creates proof and responds to request for proof (by filter)
+    # 6. HolderProver creates proof and responds to request for proof (by filter)
     claim_uuid = set([*display_pruned_prefilt]).pop()
     proof_req_json = form_json(
         'proof-request',
@@ -257,10 +257,10 @@ async def test_wrapper(
     print("\n== 6 == the proof (by filter) verifies as {}".format(ppjson(verification_resp)))
     assert verification_resp
 
-    # 8. Prover creates proof and responds to request for proof (by claim-uuid)
+    # 8. HolderProver creates proof and responds to request for proof (by claim-uuid)
     proof_req_json_by_uuid = form_json(
         'proof-request-by-claim-uuid',
-        json.dumps(claim_uuid),
+        (json.dumps(claim_uuid),),
         did['the-org-book'])
     url = url_for(cfg['sri']['Agent'], 'proof-request-by-claim-uuid')
     r = requests.post(url, json=json.loads(proof_req_json_by_uuid))
@@ -270,7 +270,7 @@ async def test_wrapper(
 
     proof_req_json_by_non_uuid = form_json(
         'proof-request-by-claim-uuid',
-        json.dumps('claim::ffffffff-ffff-ffff-ffff-ffffffffffff'),
+        (json.dumps('claim::ffffffff-ffff-ffff-ffff-ffffffffffff'),),
         did['the-org-book'])
     url = url_for(cfg['sri']['Agent'], 'proof-request-by-claim-uuid')
     r = requests.post(url, json=json.loads(proof_req_json_by_non_uuid))
@@ -279,7 +279,7 @@ async def test_wrapper(
     # 10. Verifier verify proof (by uuid)
     verification_req_json = form_json(
         'verification-request',
-        (json.dumps(proof_resp['proof-req']),json.dumps(proof_resp['proof'])))
+        (json.dumps(proof_resp['proof-req']), json.dumps(proof_resp['proof'])))
     url = url_for(cfg['sri']['Agent'], 'verification-request')
     r = requests.post(url, json=json.loads(verification_req_json))
     assert r.status_code == 200
@@ -287,16 +287,84 @@ async def test_wrapper(
     print("\n== 7 == the proof (by claim-uuid={}) verifies as {}".format(claim_uuid, ppjson(verification_resp)))
     assert verification_resp
 
-    # 11. Exercise helper GET TXN call
+    # 11. Create and store SRI registration completion claim from verified proof
+    sri_claim_hello_json = form_json(
+        'claim-hello',
+        (did['sri'],))
+    url = url_for(cfg['sri']['Agent'], 'claim-hello')
+    r = requests.post(url, json=json.loads(sri_claim_hello_json))
+    assert r.status_code == 200
+    sri_claim_req = r.json()
+    assert sri_claim_req
+
+    sri_claim = revealed_attrs(proof_resp['proof'])
+    yyyy_mm_dd = datetime.date.today().strftime('%Y-%m-%d')
+    sri_claim['sriRegDate'] = yyyy_mm_dd
+
+    sri_claim_create_json = form_json(
+        'claim-create',
+        (json.dumps(sri_claim_req), json.dumps(sri_claim)))
+    url = url_for(cfg['sri']['Agent'], 'claim-create')
+    r = requests.post(url, json=json.loads(sri_claim_create_json))
+    assert r.status_code == 200
+    sri_claim = r.json()
+    assert sri_claim
+
+    sri_claim_store_json = form_json(
+        'claim-store',
+        (json.dumps(sri_claim),))
+    url = url_for(cfg['sri']['Agent'], 'claim-store')
+    r = requests.post(url, json=json.loads(sri_claim_store_json))
+    assert r.status_code == 200
+    # response is empty
+
+    # 12. SRI (as HolderProver) finds claims
+    sri_claim_req_all_json = form_json(
+        'claim-request',
+        (json.dumps({}),))
+    url = url_for(cfg['sri']['Agent'], 'claim-request')
+    r = requests.post(url, json=json.loads(sri_claim_req_all_json))
+    assert r.status_code == 200
+    sri_claims_all = r.json()
+    print("\n== 8 == SRI claims-all: {}".format(ppjson(sri_claims_all)))
+    assert sri_claims_all
+
+    # 13. SRI (as HolderProver) create proof (by claim-uuid)
+    sri_display = claims_for(sri_claims_all['claims'])
+    assert len(sri_display) == 1
+    sri_claim_uuid = set([*sri_display]).pop()
+    sri_proof_req_json_by_uuid = form_json(
+        'proof-request-by-claim-uuid',
+        (json.dumps(sri_claim_uuid),))
+    url = url_for(cfg['sri']['Agent'], 'proof-request-by-claim-uuid')
+    r = requests.post(url, json=json.loads(sri_proof_req_json_by_uuid))
+    assert r.status_code == 200
+    sri_proof_resp = r.json()
+    assert sri_proof_resp
+
+    # 14. SRI (as Verifier) verify proof (by uuid)
+    sri_verification_req_json = form_json(
+        'verification-request',
+        (json.dumps(sri_proof_resp['proof-req']), json.dumps(sri_proof_resp['proof'])))
+    url = url_for(cfg['sri']['Agent'], 'verification-request')
+    r = requests.post(url, json=json.loads(sri_verification_req_json))
+    assert r.status_code == 200
+    sri_verification_resp = r.json()
+    print("\n== 9 == the SRI proof (by claim-uuid={}) verifies as {}".format(
+        sri_claim_uuid,
+        ppjson(sri_verification_resp)))
+    assert sri_verification_resp
+
+    # 15. Exercise helper GET TXN call
     url = url_for(cfg['sri']['Agent'], 'txn/{}'.format(schema['seqNo']))
     r = requests.get(url)
     assert r.status_code == 200
     assert r.json()
-    print("\n== 8 == ledger transaction by seq no {}: {}".format(schema['seqNo'], ppjson(r.json())))
+    print("\n== 10 == ledger transaction by seq no {}: {}".format(schema['seqNo'], ppjson(r.json())))
     
-    # 12. txn# non-existence case
+    # 16. txn# non-existence case
     url = url_for(cfg['sri']['Agent'], 'txn/99999')
     r = requests.get(url)  # ought not exist
     assert r.status_code == 200
-    print("\n== 9 == txn #99999: {}".format(ppjson(r.json())))
+    print("\n== 11 == txn #99999: {}".format(ppjson(r.json())))
     assert not r.json() 

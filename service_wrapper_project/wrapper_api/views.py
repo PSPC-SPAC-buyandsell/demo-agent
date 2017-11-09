@@ -51,8 +51,8 @@ class ServiceWrapper(APIView):
             return Response(json.loads(rv_json))  # FIXME: this only loads it to dump it: it's already json
         except Exception as e:
             import traceback
-            print('\n\n==== CHECK POST X {}, {}'.format(req.path, e))
-            traceback.print_exc()
+            logging.exception('Exception on {}: {}'.format(req.path, e))
+            # traceback.print_exc()
             return Response(
                 status=500,
                 data={

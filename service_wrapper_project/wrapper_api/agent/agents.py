@@ -181,7 +181,7 @@ class BaseAgent:
 
     async def get_schema(self, issuer_did: str, name: str, version: str) -> str:
         """
-        Method for issuer/verifier/prover to get schema from ledger by issuer, name, and version;
+        Method for Issuer/Verifier/HolderProver to get schema from ledger by issuer, name, and version;
         empty production {} for none, IndyError with error_code = ErrorCode.LedgerInvalidTransaction
         for bad request.
 
@@ -860,12 +860,12 @@ class Origin(BaseListeningAgent):
 
 class Issuer(BaseListeningAgent):
     """
-    Mixin for agent acting in role of issuer
+    Mixin for agent acting in role of Issuer
     """
 
     async def send_claim_def(self, schema_json: str) -> str:
         """
-        Method for issuer to create a claim definition, store it in its wallet, and send it to the ledger.
+        Method for Issuer to create a claim definition, store it in its wallet, and send it to the ledger.
 
         :param schema_json: schema as it appears on ledger via get_schema()
         :return: json claim definition as it appears on ledger
@@ -903,10 +903,10 @@ class Issuer(BaseListeningAgent):
 
     async def create_claim(self, claim_req_json: str, claim: dict) -> (str, str):
         """
-        Method for issuer to create claim out of claim request and dict of key:[value, encoding] entries
+        Method for Issuer to create claim out of claim request and dict of key:[value, encoding] entries
         for revealed attributes.
 
-        :param claim_req_json: claim request as created by prover
+        :param claim_req_json: claim request as created by HolderProver
         :param claim: claim dict mapping each revealed attribute to its [value, encoding];
             e.g., {
                 'favourite_drink': ['martini', '1103189706537168622028552856221241'],
@@ -981,9 +981,10 @@ class Issuer(BaseListeningAgent):
         raise NotImplementedError('{} does not support token type {}'.format(self.__class__.__name__, form['type']))
 
 
-class Prover(BaseListeningAgent):
+class HolderProver(BaseListeningAgent):
     """
-    Mixin for agent acting in the role of prover
+    Mixin for agent acting in the role of w3c Holder and indy-sdk Prover. A Holder holds claims,
+    and a Prover produces proof for claims.
     """
 
     def __init__(self,
@@ -1007,7 +1008,7 @@ class Prover(BaseListeningAgent):
         """
 
         logger = logging.getLogger(__name__)
-        logger.debug('Prover.__init__: >>> ' +
+        logger.debug('HolderProver.__init__: >>> ' +
             'pool: {}, ' +
             'seed: [SEED], ' +
             'wallet_base_name: {}, ' +
@@ -1020,12 +1021,12 @@ class Prover(BaseListeningAgent):
         self._master_secret = None
         self._claim_req_json = None  # FIXME: support multiple schema, use dict: txn_no -> claim_req_json
 
-        logger.debug('Prover.__init__: <<<')
+        logger.debug('HolderProver.__init__: <<<')
 
     @property
     def claim_req_json(self) -> str:
         """
-        Accessor for (prover) agent claim request json as stored in wallet
+        Accessor for (HolderProver) agent claim request json as stored in wallet
 
         :return: agent claim request json as stored in wallet
         """
@@ -1034,25 +1035,25 @@ class Prover(BaseListeningAgent):
 
     async def create_master_secret(self, master_secret: str) -> None:
         """
-        Method for prover to create a master secret used in proofs.
+        Method for HolderProver to create a master secret used in proofs.
 
         :param master_secret: label for master secret; indy-sdk uses label to generate master secret
         """
 
         logger = logging.getLogger(__name__)
-        logger.debug('Prover.create_master_secret: >>> master_secret {}'.format(master_secret))
+        logger.debug('HolderProver.create_master_secret: >>> master_secret {}'.format(master_secret))
 
         await anoncreds.prover_create_master_secret(self.wallet.handle, master_secret)
-        self._master_secret = master_secret  # prover
-        logger.debug('Prover.create_master_secret: <<<')
+        self._master_secret = master_secret
+        logger.debug('HolderProver.create_master_secret: <<<')
 
     async def store_claim_offer(self, issuer_did: str, schema_seq_no: int) -> None:
         """
-        Method for prover to store a claim offer in its wallet.
+        Method for HolderProver to store a claim offer in its wallet.
         """
 
         logger = logging.getLogger(__name__)
-        logger.debug('Prover.store_claim_offer: >>> issuer_did: {}, schema_seq_no: {}'.format(
+        logger.debug('HolderProver.store_claim_offer: >>> issuer_did: {}, schema_seq_no: {}'.format(
             issuer_did,
             schema_seq_no))
 
@@ -1063,12 +1064,12 @@ class Prover(BaseListeningAgent):
                 'schema_seq_no': schema_seq_no
             }))
 
-        logger.debug('Prover.store_claim_offer: <<<')
+        logger.debug('HolderProver.store_claim_offer: <<<')
 
 
     async def store_claim_req(self, issuer_did: str, claim_def_json: str) -> str:
         """
-        Method for prover to create a claim request and store it in its wallet.
+        Method for HolderProver to create a claim request and store it in its wallet.
 
         :param issuer_did: claim issuer DID
         :param claim_def_json: claim definition json as retrieved from ledger via get_claim_def()
@@ -1076,7 +1077,7 @@ class Prover(BaseListeningAgent):
         """
 
         logger = logging.getLogger(__name__)
-        logger.debug('Prover.store_claim_req: >>> issuer_did: {}, claim_def_json: {}'.format(
+        logger.debug('HolderProver.store_claim_req: >>> issuer_did: {}, claim_def_json: {}'.format(
             issuer_did,
             claim_def_json))
 
@@ -1096,21 +1097,21 @@ class Prover(BaseListeningAgent):
             self._master_secret);
 
         self._claim_req_json = rv
-        logger.debug('Prover.store_claim_req: <<< {}'.format(rv))
+        logger.debug('HolderProver.store_claim_req: <<< {}'.format(rv))
         return rv
 
     async def store_claim(self, claim_json: str) -> None:
         """
-        Method for prover to store claim in wallet.
+        Method for HolderProver to store claim in wallet.
 
-        :param claim_json: json claim as prover created
+        :param claim_json: json claim as HolderProver created
         """
 
         logger = logging.getLogger(__name__)
-        logger.debug('Prover.store_claim: >>> claim_json: {}'.format(claim_json))
+        logger.debug('HolderProver.store_claim: >>> claim_json: {}'.format(claim_json))
 
         await anoncreds.prover_store_claim(self.wallet.handle, claim_json)
-        logger.debug('Prover.store_claim: <<<')
+        logger.debug('HolderProver.store_claim: <<<')
 
     async def create_proof(self,
             proof_req_json: str,
@@ -1118,14 +1119,14 @@ class Prover(BaseListeningAgent):
             claim_def: dict,
             requested_claims: dict = None) -> str:
         """
-        Method for prover to create proof.
+        Method for HolderProver to create proof.
 
-        :param proof_req_json: proof request json as verifier creates; has entries for proof request's
+        :param proof_req_json: proof request json as Verifier creates; has entries for proof request's
             nonce, name, and version; plus claim's requested attributes, requested predicates.
             E.g., {
-                'nonce': '12345',  # for verifier info, not prover matching
-                'name': 'proof-request',  # for verifier info, not prover matching
-                'version': '1.0',  # for verifier info, not prover matching
+                'nonce': '12345',  # for Verifier info, not HolderProver matching
+                'name': 'proof-request',  # for Verifier info, not HolderProver matching
+                'version': '1.0',  # for Verifier info, not HolderProver matching
                 'requested_attrs': {
                     'attr1_uuid': {
                         'schema_seq_no': 57,
@@ -1168,7 +1169,7 @@ class Prover(BaseListeningAgent):
 
         logger = logging.getLogger(__name__)
         logger.debug(
-            'Prover.create_proof: >>> proof_req_json: {}, schema: {}, claim_def: {}, requested_claims: {}'.format(
+            'HolderProver.create_proof: >>> proof_req_json: {}, schema: {}, claim_def: {}, requested_claims: {}'.format(
                 proof_req_json,
                 schema,
                 claim_def,
@@ -1196,19 +1197,19 @@ class Prover(BaseListeningAgent):
             }),
             json.dumps({})  # revoc_regs_json
         )
-        logger.debug('Prover.create_proof: <<< {}'.format(rv))
+        logger.debug('HolderProver.create_proof: <<< {}'.format(rv))
         return rv
 
     async def get_claims(self, proof_req_json: str, filt: dict = None) -> (Set[str], str):
         """
-        Method for prover to get claims (from wallet) corresponding to proof request
+        Method for HolderProver to get claims (from wallet) corresponding to proof request
 
-        :param proof_req: proof request json as verifier creates; has entries for proof request's
+        :param proof_req: proof request json as Verifier creates; has entries for proof request's
             nonce, name, and version; plus claim's requested attributes, requested predicates
             E.g., {
-                'nonce': '12345',  # for verifier info, not prover matching
-                'name': 'proof-request',  # for verifier info, not prover matching
-                'version': '1.0',  # for verifier info, not prover matching
+                'nonce': '12345',  # for Verifier info, not HolderProver matching
+                'name': 'proof-request',  # for Verifier info, not HolderProver matching
+                'version': '1.0',  # for Verifier info, not HolderProver matching
                 'requested_attrs': {
                     'attr1_uuid': {
                         'schema_seq_no': 57,
@@ -1241,7 +1242,7 @@ class Prover(BaseListeningAgent):
         """
 
         logger = logging.getLogger(__name__)
-        logger.debug('Prover.get_claims: >>> proof_req_json: {}, filt: {}'.format(proof_req_json, filt))
+        logger.debug('HolderProver.get_claims: >>> proof_req_json: {}, filt: {}'.format(proof_req_json, filt))
 
         claims_for_proof_json = await anoncreds.prover_get_claims_for_proof_req(self.wallet.handle, proof_req_json)
         claims_for_proof = json.loads(claims_for_proof_json)
@@ -1258,12 +1259,12 @@ class Prover(BaseListeningAgent):
             claims_for_proof = json.loads(prune_claims_json(claim_uuids, claims_for_proof))
 
         rv = (claim_uuids, json.dumps(claims_for_proof))
-        logger.debug('Prover.get_claims: <<< {}'.format(rv))
+        logger.debug('HolderProver.get_claims: <<< {}'.format(rv))
         return rv
 
     async def get_claim_by_claim_uuid(self, schema_json: str, claim_uuid: str) -> str:
         """
-        Method for prover to get claim (from wallet) by claim-uuid
+        Method for HolderProver to get claim (from wallet) by claim-uuid
 
         :param schema_json: schema json
         :param claim-uuid: claim uuid
@@ -1271,15 +1272,15 @@ class Prover(BaseListeningAgent):
         """
 
         logger = logging.getLogger(__name__)
-        logger.debug('Prover.get_claim_by_claim_uuid: >>> schema_json: {}, claim_uuid: {}'.format(
+        logger.debug('HolderProver.get_claim_by_claim_uuid: >>> schema_json: {}, claim_uuid: {}'.format(
             schema_json,
             claim_uuid))
 
         schema = json.loads(schema_json)
         claim_req_json = json.dumps({
                 'nonce': str(int(time() * 1000)),
-                'name': 'claim-request',  # for verifier info, not prover matching
-                'version': '1.0',  # for verifier info, not prover matching
+                'name': 'claim-request',  # for Verifier info, not HolderProver matching
+                'version': '1.0',  # for Verifier info, not HolderProver matching
                 'requested_attrs': {
                     '{}_uuid'.format(attr): {
                         'schema_seq_no': schema['seqNo'],
@@ -1294,20 +1295,20 @@ class Prover(BaseListeningAgent):
 
         # retain only claim of interest: find corresponding claim uuid
         rv = prune_claims_json({claim_uuid}, json.loads(claims_for_proof_json))
-        logger.debug('Prover.get_claim_by_claim_uuid: <<< {}'.format(rv))
+        logger.debug('HolderProver.get_claim_by_claim_uuid: <<< {}'.format(rv))
         return rv
 
     async def reset_wallet(self) -> int:
         """
-        Method for Prover to close and delete wallet, then create and open a new one.
-        Useful for demo purpose so as not to have to shut down and restart the Prover from django.
+        Method for HolderProver to close and delete wallet, then create and open a new one.
+        Useful for demo purpose so as not to have to shut down and restart the HolderProver from django.
         Precursor to revocation, and issuer/filter-specifiable claim deletion.
 
         :return: wallet num
         """
 
         logger = logging.getLogger(__name__)
-        logger.debug('Prover.reset_wallet: >>>')
+        logger.debug('HolderProver.reset_wallet: >>>')
 
         if self._master_secret is None:
             x = ValueError('Master secret is not set')
@@ -1325,7 +1326,7 @@ class Prover(BaseListeningAgent):
         await self.create_master_secret(self._master_secret)  # carry over master secret to new wallet
 
         rv = self.wallet.num
-        logger.debug('Prover.reset_wallet: <<< {}'.format(rv))
+        logger.debug('HolderProver.reset_wallet: <<< {}'.format(rv))
         return rv
 
     async def process_post(self, form: dict) -> str:
@@ -1338,16 +1339,16 @@ class Prover(BaseListeningAgent):
         """
 
         logger = logging.getLogger(__name__)
-        logger.debug('Prover.process_post: >>> form: {}'.format(form))
+        logger.debug('HolderProver.process_post: >>> form: {}'.format(form))
 
         self.__class__._vet_keys({'type', 'data'}, set(form.keys()))  # all tokens need type and data
 
         # Try each responder code base from BaseListeningAgent up before trying locally
-        mro = Prover._mro_dispatch()
+        mro = HolderProver._mro_dispatch()
         for ResponderClass in mro:
             try:
                 rv = await ResponderClass.process_post(self, form)
-                logger.debug('Prover.process_post: <<< {}'.format(rv))
+                logger.debug('HolderProver.process_post: <<< {}'.format(rv))
                 return rv
             except NotImplementedError:
                 pass
@@ -1358,7 +1359,7 @@ class Prover(BaseListeningAgent):
             await self.create_master_secret(form['data']['label'])
 
             rv = json.dumps({})
-            logger.debug('Prover.process_post: <<< {}'.format(rv))
+            logger.debug('HolderProver.process_post: <<< {}'.format(rv))
             return rv
 
         elif form['type'] == 'claim-hello':
@@ -1371,7 +1372,7 @@ class Prover(BaseListeningAgent):
             await self.store_claim_req(form['data']['issuer-did'], claim_def_json)
 
             rv = self.claim_req_json
-            logger.debug('Prover.process_post: <<< {}'.format(rv))
+            logger.debug('HolderProver.process_post: <<< {}'.format(rv))
             return rv
 
         elif form['type'] in ('claim-request', 'proof-request'):
@@ -1415,7 +1416,7 @@ class Prover(BaseListeningAgent):
                     'proof-req': find_req,
                     'claims': claims_found
                 })
-                logger.debug('Prover.process_post: <<< {}'.format(rv))
+                logger.debug('HolderProver.process_post: <<< {}'.format(rv))
                 return rv
 
             # FIXME: what if there are multiple matching claims to prove? How to encode requested attrs/preds?
@@ -1444,7 +1445,7 @@ class Prover(BaseListeningAgent):
                 'proof-req': find_req,
                 'proof': json.loads(proof_json)
             })
-            logger.debug('Prover.process_post: <<< {}'.format(rv))
+            logger.debug('HolderProver.process_post: <<< {}'.format(rv))
             return rv
 
         elif form['type'] == 'proof-request-by-claim-uuid':
@@ -1498,7 +1499,7 @@ class Prover(BaseListeningAgent):
                 'proof-req': proof_req,
                 'proof': json.loads(proof_json)
             })
-            logger.debug('Prover.process_post: <<< {}'.format(rv))
+            logger.debug('HolderProver.process_post: <<< {}'.format(rv))
             return rv
 
         elif form['type'] == 'claim-store':
@@ -1508,7 +1509,7 @@ class Prover(BaseListeningAgent):
             await self.store_claim(json.dumps(form['data']['claim']))
 
             rv = json.dumps({})
-            logger.debug('Prover.process_post: <<< {}'.format(rv))
+            logger.debug('HolderProver.process_post: <<< {}'.format(rv))
             return rv
 
         elif form['type'] == 'claims-reset':
@@ -1516,29 +1517,29 @@ class Prover(BaseListeningAgent):
             await self.reset_wallet()
 
             rv = json.dumps({})
-            logger.debug('Prover.process_post: <<< {}'.format(rv))
+            logger.debug('HolderProver.process_post: <<< {}'.format(rv))
             return rv
 
         # token-type
-        logger.debug('Prover.process_post: <!< not this form type: {}'.format(form['type']))
+        logger.debug('HolderProver.process_post: <!< not this form type: {}'.format(form['type']))
         raise NotImplementedError('{} does not support token type {}'.format(self.__class__.__name__, form['type']))
 
 
 class Verifier(BaseListeningAgent):
     """
-    Mixin for agent acting in the role of verifier.
+    Mixin for agent acting in the role of Verifier.
     """
 
     async def verify_proof(self, proof_req_json: str, proof: dict, schema: dict, claim_def: dict) -> str:
         """
-        Method for verifier to verify proof.
+        Method for Verifier to verify proof.
 
-        :param proof_req_json: proof request json as verifier creates; has entries for proof request's
+        :param proof_req_json: proof request json as Verifier creates; has entries for proof request's
             nonce, name, and version; plus claim's requested attributes, requested predicates
             E.g., {
-                'nonce': '12345',  # for verifier info, not prover matching
-                'name': 'proof-request',  # for verifier info, not prover matching
-                'version': '1.0',  # for verifier info, not prover matching
+                'nonce': '12345',  # for Verifier info, not HolderProver matching
+                'name': 'proof-request',  # for Verifier info, not HolderProver matching
+                'version': '1.0',  # for Verifier info, not HolderProver matching
                 'requested_attrs': {
                     'attr1_uuid': {
                         'schema_seq_no': 57,
@@ -1561,7 +1562,7 @@ class Verifier(BaseListeningAgent):
                     }
                 }
             }
-        :param proof: proof as prover creates
+        :param proof: proof as HolderProver creates
         :param schema: schema used in proof, as retrieved from ledger (multiple schemata not supported yet)
         :param claim_def: claim definition as retrieved from ledger
         :return: json encoded True if proof is valid; False if not
@@ -1600,7 +1601,7 @@ class Verifier(BaseListeningAgent):
         """
 
         logger = logging.getLogger(__name__)
-        logger.debug('Prover.process_post: >>> form: {}'.format(form))
+        logger.debug('HolderProver.process_post: >>> form: {}'.format(form))
 
         self.__class__._vet_keys({'type', 'data'}, set(form.keys()))  # all tokens need type and data
 
