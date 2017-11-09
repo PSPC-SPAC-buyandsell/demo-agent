@@ -398,6 +398,42 @@ class BaseListeningAgent(BaseAgent):
         logger.debug('BaseListeningAgent.get_claim_def: <<< {}'.format(rv))
         return rv
 
+    async def get_schema(self, issuer_did: str, name: str, version: str) -> str:
+        """
+        Method to get schema from ledger by issuer, name, and version; empty production {} for none,
+        IndyError with error_code = ErrorCode.LedgerInvalidTransaction
+        for bad request.
+
+        BaseListenerAgent.get_schema() caches schema for future calls before returning.
+
+        :param issuer_did: DID of schema issuer
+        :param name: schema name
+        :param version: schema version string
+        :return: schema json as retrieved from ledger
+        """
+
+        logger = logging.getLogger(__name__)
+        logger.debug('BaseListeningAgent.get_schema: >>> issuer_did: {}, name: {}, version: {}'.format(
+            issuer_did,
+            name,
+            version))
+
+        schema_json = await super().get_schema(issuer_did, name, version)
+        schema = json.loads(schema_json)
+
+        if schema:
+            self._schema_cache = {
+                'issuer-did': issuer_did,
+                'name': name,
+                'version': version,
+                'seq_no': schema['seqNo'],
+                'json': schema_json
+            }
+
+        rv = schema_json
+        logger.debug('BaseListeningAgent.get_schema: <<< {}'.format(rv))
+        return rv
+
     async def _schema_info(self, form_data: dict) -> str:
         """
         Gets schema json for use in indy-sdk structures, reading it from cached property
@@ -550,14 +586,6 @@ class BaseListeningAgent(BaseAgent):
                 rv = schema_json
                 logger.debug('BaseListeningAgent.process_post: <<< {}'.format(rv))
                 return rv
-
-            # cache schema en passant for future use
-            self._schema_cache = {
-                'issuer-did': form['data']['schema']['issuer-did'],
-                'name': form['data']['schema']['name'],
-                'version': form['data']['schema']['version'],
-                'seq_no': schema['seqNo'],
-                'json': schema_json}
 
             rv = schema_json
             logger.debug('BaseListeningAgent.process_post: <<< {}'.format(rv))
@@ -838,14 +866,6 @@ class Origin(BaseListeningAgent):
                 'attr_names': form['data']['attr-names']
             }))
             schema = json.loads(schema_json)
-
-            # cache schema en passant for future use
-            self._schema_cache = {
-                'issuer-did': form['data']['schema']['issuer-did'],
-                'name': form['data']['schema']['name'],
-                'version': form['data']['schema']['version'],
-                'seq_no': schema['seqNo'],
-                'json': schema_json}
 
             rv = await self.get_schema(
                 self.schema_cache['issuer-did'],
