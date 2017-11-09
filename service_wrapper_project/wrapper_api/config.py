@@ -37,5 +37,5 @@ def init_config():
                 'config',
                 {s: dict(parser[s].items()) for s in parser.sections()})
         else:
-            raise FileNotFoundError('Configuration file(s) mission; check {}'.format(_inis))
+            raise FileNotFoundError('Configuration file(s) missing; check {}'.format(_inis))
     return cache.get('config')
