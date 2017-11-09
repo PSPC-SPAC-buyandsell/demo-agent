@@ -139,6 +139,8 @@ async def test_agents_direct(
     assert schema
     print("\n\n=== 2 === SCHEMA {}".format(ppjson(schema)))
 
+    await sag.get_schema(tag.did, schema_data['name'], schema_data['version'])  # seed sag for future issue
+
     # 5. Issuer create, store,  and publish claim def to ledger
     # print('TAG DID {}'.format(tag.did))      # V4SG...
     # print('SAG DID {}'.format(sag.did))      # FaBA...
@@ -738,6 +740,7 @@ async def test_agents_process_forms_local(
         # 13. Finish bootstrapping SRI as HolderProver to complete SRI registration
         master_secret_set_form['data']['label'] = 'shhhh'
         await sag.process_post(master_secret_set_form)
+        await sag.process_post(schema_lookup_form)  # bootstrap HolderProver with current schema
         sri_claims_reset_resp = json.loads(await sag.process_post(claims_reset_form))
         assert not sri_claims_reset_resp  # make sure later ops are OK on reset wallet -- response is {} if OK
 
