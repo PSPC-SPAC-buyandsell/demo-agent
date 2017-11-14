@@ -17,9 +17,9 @@ limitations under the License.
 from django.apps.config import AppConfig
 from django.core.cache import cache
 from os.path import abspath, dirname, join as pjoin
+from von_agent.nodepool import NodePool
+from von_agent.demo_agents import TrustAnchorAgent, SRIAgent, BCRegistrarAgent, OrgBookAgent
 from wrapper_api.config import init_config
-from wrapper_api.agent.nodepool import NodePool
-from wrapper_api.agent.demo_agents import TrustAnchorAgent, SRIAgent, BCRegistrarAgent, OrgBookAgent
 from wrapper_api.eventloop import do
 
 import asyncio
@@ -35,6 +35,8 @@ LOG_FORMAT='%(levelname)-8s || %(name)-12s || %(message)s'
 logging.basicConfig(
     level=logging.DEBUG,
     format=LOG_FORMAT)
+logging.getLogger('asyncio').setLevel(logging.ERROR)
+logging.getLogger('von_agent').setLevel(logging.ERROR)
 logging.getLogger('indy').setLevel(logging.ERROR)
 logging.getLogger('requests').setLevel(logging.ERROR)
 logging.getLogger('urllib3').setLevel(logging.CRITICAL)

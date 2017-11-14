@@ -16,12 +16,46 @@ limitations under the License.
 
 from configparser import ConfigParser
 from os.path import abspath, dirname, isfile, join as pjoin
-from ..agent.util import ppjson, claims_for, prune_claims_json, revealed_attrs
+from von_agent.util import ppjson, claims_for, prune_claims_json, revealed_attrs
 
+import atexit
 import datetime
 import json
+import pexpect
 import pytest
 import requests
+
+
+def shutdown(wrapper):
+    wrapper.stop()
+
+class Wrapper:
+    def __init__(self, agent_profile):
+        self._script = pjoin(dirname(dirname(dirname(abspath(__file__)))), 'bin', agent_profile)
+        self._agent_profile = agent_profile
+
+    def start(self):
+        self._proc = pexpect.spawn(self._script)
+        rc = self._proc.expect(
+            [
+                'Quit the server with CONTROL-C[.]',
+                'indy[.]error[.]IndyError.+\r\n',
+                pexpect.EOF,
+                pexpect.TIMEOUT
+            ],
+            timeout=180)
+        if rc == 1:
+            raise ValueError('Service wrapper for {} error: {}'.format(self._agent_profile, self._proc.after.decode()))
+        elif rc == 2:
+            raise ValueError('Service wrapper for {} stopped'.format(self._agent_profile))
+        elif rc == 3:
+            raise ValueError('Timed out waiting on service wrapper for {}'.format(self._agent_profile))
+        return rc
+
+    def stop(self):
+        if self._proc.isalive():
+            self._proc.sendcontrol('c')
+            self._proc.close()
 
 
 def form_json(msg_type, args, proxy_did=None):
@@ -66,11 +100,7 @@ async def test_wrapper(
         seed_trustee1,
         pool_genesis_txn_file,
         path_home):
-    """
-    RUST_LOG=error TEST_POOL_IP=10.0.0.2 AGENT_PROFILE=the-org-book python manage.py runserver --settings=config.settings.local 0.0.0.0:9702 --noreload
-    """
-
-    agent_roles = ['trust-anchor', 'sri', 'the-org-book', 'bc-registrar']
+    agent_profiles = ['trust-anchor', 'sri', 'the-org-book', 'bc-registrar']
 
     # 0. configure
     cfg = {}
@@ -80,26 +110,34 @@ async def test_wrapper(
     parser.read(ini)
     cfg = {s: dict(parser[s].items()) for s in parser.sections()}
 
-    for agent_role in agent_roles:
-        ini = pjoin(dirname(dirname(abspath(__file__))), 'config', 'agent-profile', '{}.ini'.format(agent_role))
+    for agent_profile in agent_profiles:
+        ini = pjoin(dirname(dirname(abspath(__file__))), 'config', 'agent-profile', '{}.ini'.format(agent_profile))
         assert isfile(ini)
         agent_parser = ConfigParser()
         agent_parser.read(ini)
 
-        cfg[agent_role] = {s: dict(agent_parser[s].items()) for s in agent_parser.sections()}
+        cfg[agent_profile] = {s: dict(agent_parser[s].items()) for s in agent_parser.sections()}
 
     print("\n\n=== Test config: {}".format(ppjson(cfg)))
 
-    # 1. ensure all demo agents are up
+    # 1. start wrappers
+    service_wrapper = {}
+    for agent_profile in agent_profiles:
+        service_wrapper[agent_profile] = Wrapper(agent_profile)
+        service_wrapper[agent_profile].start()
+        atexit.register(shutdown, service_wrapper[agent_profile])
+        print("=== Started wrapper: {}".format(agent_profile))
+
+    # 2. ensure all demo agents (wrappers) are up
     did = {}
-    for agent_role in agent_roles:
-        url = url_for(cfg[agent_role]['Agent'], 'did')
+    for agent_profile in agent_profiles:
+        url = url_for(cfg[agent_profile]['Agent'], 'did')
         r = requests.get(url)
         assert r.status_code == 200
-        did[agent_role] = r.json()
+        did[agent_profile] = r.json()
 
     print("\n\n=== DIDs: {}".format(ppjson(did)))
-    # 2. get schema
+    # 3. get schema
     schema_lookup_json = form_json(
         'schema-lookup',
         (
@@ -112,7 +150,7 @@ async def test_wrapper(
     assert r.status_code == 200
     schema = r.json()
 
-    # 3. HolderProver responds to claims-reset directive, to restore state to base line
+    # 4. HolderProver responds to claims-reset directive, to restore state to base line
     claims_reset_json = form_json(
         'claims-reset',
         ())
@@ -131,7 +169,7 @@ async def test_wrapper(
     reset_resp = r.json()
     assert not reset_resp
 
-    # 4. issuer claim-hello; then create, store each claim
+    # 5. issuer claim-hello; then create, store each claim
     claim_hello_json = form_json(
         'claim-hello',
         (did['bc-registrar'],),
@@ -197,7 +235,7 @@ async def test_wrapper(
         assert r.status_code == 200
         # response is empty
 
-    # 5. HolderProver finds claims
+    # 6. HolderProver finds claims
     claim_req_all_json = form_json(
         'claim-request',
         (json.dumps({}),),
@@ -234,7 +272,7 @@ async def test_wrapper(
     assert set([*display_pruned_postfilt]) == set([*display_pruned_prefilt])
     assert len(display_pruned_postfilt) == 1
 
-    # 6. HolderProver creates proof and responds to request for proof (by filter)
+    # 7. HolderProver creates proof and responds to request for proof (by filter)
     claim_uuid = set([*display_pruned_prefilt]).pop()
     proof_req_json = form_json(
         'proof-request',
@@ -246,7 +284,7 @@ async def test_wrapper(
     proof_resp = r.json()
     assert proof_resp
 
-    # 7. Verifier verify proof (by filter)
+    # 8. Verifier verify proof (by filter)
     verification_req_json = form_json(
         'verification-request',
         (json.dumps(proof_resp['proof-req']),json.dumps(proof_resp['proof'])))
@@ -257,7 +295,7 @@ async def test_wrapper(
     print("\n== 6 == the proof (by filter) verifies as {}".format(ppjson(verification_resp)))
     assert verification_resp
 
-    # 8. HolderProver creates proof and responds to request for proof (by claim-uuid)
+    # 9. HolderProver creates proof and responds to request for proof (by claim-uuid)
     proof_req_json_by_uuid = form_json(
         'proof-request-by-claim-uuid',
         (json.dumps(claim_uuid),),
